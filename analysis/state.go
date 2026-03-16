@@ -121,7 +121,8 @@ func (s *State) parseDocument(uri, text string) {
 }
 
 func (s *State) OpenDocument(uri, text string) {
-	s.refreshDbtContext("")
+	filePath := strings.TrimPrefix(uri, "file://")
+	s.refreshDbtContext(filepath.Dir(filePath))
 	s.parseDocument(uri, text)
 }
 
@@ -199,7 +200,8 @@ func (s *State) applyIncrementalChange(text string, change lsp.TextDocumentConte
 }
 
 func (s *State) SaveDocument(uri string) {
-	s.refreshDbtContext("")
+	filePath := strings.TrimPrefix(uri, "file://")
+	s.refreshDbtContext(filepath.Dir(filePath))
 }
 
 func (s *State) Hover(id int, uri string, position lsp.Position) lsp.HoverResponse {
