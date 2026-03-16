@@ -29,10 +29,11 @@ type InitializeResult struct {
 type ServerCapabilities struct {
 	TextDocumentSync int `json:"textDocumentSync"`
 
-	HoverProvider          bool                  `json:"hoverProvider"`
-	DefinitionProvider     bool                  `json:"definitionProvider"`
-	CompletionProvider     map[string]any        `json:"completionProvider"`
-	ExecuteCommandProvider ExecuteCommandOptions `json:"executeCommandProvider"`
+	HoverProvider          bool                   `json:"hoverProvider"`
+	DefinitionProvider     bool                   `json:"definitionProvider"`
+	CompletionProvider     map[string]any         `json:"completionProvider"`
+	ExecuteCommandProvider ExecuteCommandOptions  `json:"executeCommandProvider"`
+	SemanticTokensProvider *SemanticTokensOptions `json:"semanticTokensProvider,omitempty"`
 }
 
 type ExecuteCommandOptions struct {
@@ -58,6 +59,20 @@ func NewInitializeResponse(id int) InitializeResponse {
 				CompletionProvider: map[string]any{},
 				ExecuteCommandProvider: ExecuteCommandOptions{
 					Commands: []string{"dbt.goToSchema"},
+				},
+				SemanticTokensProvider: &SemanticTokensOptions{
+					Legend: SemanticTokensLegend{
+						TokenTypes: []string{
+							"function",
+							"macro",
+							"variable",
+							"namespace",
+							"keyword",
+							"operator",
+						},
+						TokenModifiers: []string{},
+					},
+					Full: true,
 				},
 			},
 			ServerInfo: ServerInfo{

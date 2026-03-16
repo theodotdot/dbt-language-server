@@ -66,27 +66,54 @@ func getQuoteType(str string) string {
 	return string(allMatches[len(allMatches)-1])
 }
 
+func buildMacroSnippet(prefix string, args []MacroArg) string {
+	var b strings.Builder
+	b.WriteString(prefix)
+	b.WriteByte('(')
+	for i, arg := range args {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		if arg.Default != "" {
+			b.WriteString(fmt.Sprintf("${%d:%s}", i+1, arg.Default))
+		} else {
+			b.WriteString(fmt.Sprintf("${%d:%s}", i+1, arg.Name))
+		}
+	}
+	b.WriteByte(')')
+	return b.String()
+}
+
 func getMacroCompletionItems(packageMacroMap map[Package]map[string]Macro, ProjectYaml DbtProjectYaml) []lsp.CompletionItem {
 	items := make([]lsp.CompletionItem, 0, len(packageMacroMap))
 
 	for _, macroMap := range packageMacroMap {
 		for k := range macroMap {
-			var insertText string
-			if ProjectYaml.ProjectName.Value == string(macroMap[k].ProjectName) {
-				insertText = k
+			macro := macroMap[k]
+			var prefix string
+			if ProjectYaml.ProjectName.Value == string(macro.ProjectName) {
+				prefix = k
 			} else {
-				insertText = fmt.Sprintf("%s.%s", macroMap[k].ProjectName, k)
+				prefix = fmt.Sprintf("%s.%s", macro.ProjectName, k)
+			}
+
+			insertText := prefix
+			insertTextFormat := 0
+			if len(macro.Arguments) > 0 {
+				insertText = buildMacroSnippet(prefix, macro.Arguments)
+				insertTextFormat = 2 // Snippet
 			}
 
 			items = append(
 				items,
 				lsp.CompletionItem{
-					Label:         k,
-					Detail:        fmt.Sprintf("Project: %s", macroMap[k].ProjectName),
-					Documentation: macroMap[k].Description,
-					Kind:          completionKind.Snippet,
-					InsertText:    insertText,
-					SortText:      k,
+					Label:            k,
+					Detail:           fmt.Sprintf("Project: %s", macro.ProjectName),
+					Documentation:    macro.Description,
+					Kind:             completionKind.Snippet,
+					InsertText:       insertText,
+					InsertTextFormat: insertTextFormat,
+					SortText:         k,
 				},
 			)
 		}

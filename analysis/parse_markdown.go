@@ -2,16 +2,10 @@ package analysis
 
 import (
 	"os"
-	"regexp"
-	"strings"
 
+	"github.com/j-clemons/dbt-language-server/analysis/jinja"
 	"github.com/j-clemons/dbt-language-server/util"
 )
-
-type Docs struct {
-	Name    string
-	Content string
-}
 
 func getDocsFiles(dbtProjectYaml DbtProjectYaml) []string {
 	docsFiles := []string{}
@@ -30,40 +24,16 @@ func getDocsFiles(dbtProjectYaml DbtProjectYaml) []string {
 	return docsFiles
 }
 
-func getDocsFileContents(docsFileStr string) []Docs {
-	docs := []Docs{}
-
-	re := regexp.MustCompile(`(?s){%-{0,1}\s*docs\s+([a-zA-z]+)\s*-{0,1}%}(.*){%-{0,1}\s*enddocs\s*%}`)
-	docsMatches := re.FindAllStringSubmatch(docsFileStr, -1)
-	for _, d := range docsMatches {
-		docs = append(
-			docs,
-			Docs{
-				Name:    d[1],
-				Content: strings.TrimSpace(d[2]),
-			},
-		)
-	}
-
-	return docs
-}
-
-func makeDocsMap(docs []Docs) map[string]Docs {
-	docsMap := make(map[string]Docs)
-	for _, d := range docs {
-		docsMap[d.Name] = d
-	}
-	return docsMap
-}
-
-func processDocsFiles(docsFilesUri []string) map[string]Docs {
-	docs := []Docs{}
+func processDocsFiles(docsFilesUri []string) map[string]string {
+	docsMap := make(map[string]string)
 	for _, docsFile := range docsFilesUri {
 		docsContents, err := util.ReadFileContents(docsFile)
 		if err != nil {
 			continue
 		}
-		docs = append(docs, getDocsFileContents(docsContents)...)
+		for name, content := range jinja.ExtractDocsBlocks(docsContents) {
+			docsMap[name] = content
+		}
 	}
-	return makeDocsMap(docs)
+	return docsMap
 }

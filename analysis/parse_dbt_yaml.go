@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 
+	"github.com/j-clemons/dbt-language-server/analysis/jinja"
 	"github.com/j-clemons/dbt-language-server/lsp"
 	"github.com/j-clemons/dbt-language-server/util"
 	"gopkg.in/yaml.v3"
@@ -91,7 +91,7 @@ func parseDbtProjectYaml(projectRoot string) DbtProjectYaml {
 
 	}
 
-	fileStr = util.ResolveEnvVars(fileStr)
+	fileStr = jinja.ResolveEnvVars(fileStr)
 
 	var projYaml DbtProjectYaml
 	if err := yaml.Unmarshal([]byte(fileStr), &projYaml); err != nil {
@@ -216,7 +216,7 @@ func parseYamlModels(projectRoot string, projYaml DbtProjectYaml) (map[string]Mo
 			for _, model := range dbtYml.Models {
 				modelMap[model.Name.Value] = ModelProperties{
 					Name:        model.Name,
-					Description: AnnotatedField[string]{Value: replaceDescriptionDocsBlocks(model.Description.Value, docsMap)},
+					Description: AnnotatedField[string]{Value: jinja.ReplaceDocBlocks(model.Description.Value, docsMap)},
 					ModelConfig: AnnotatedMap{
 						"alias": AnnotatedField[any]{
 							Value: model.ModelConfig["alias"].Value,
@@ -232,7 +232,7 @@ func parseYamlModels(projectRoot string, projYaml DbtProjectYaml) (map[string]Mo
 			for _, source := range dbtYml.Sources {
 				sourceMap[source.Name.Value] = Source{
 					Name:        source.Name.Value,
-					Description: replaceDescriptionDocsBlocks(source.Description.Value, docsMap),
+					Description: jinja.ReplaceDocBlocks(source.Description.Value, docsMap),
 					URI:         file,
 					Range: lsp.Range{
 						Start: source.Name.Position,
@@ -249,7 +249,7 @@ func parseYamlModels(projectRoot string, projYaml DbtProjectYaml) (map[string]Mo
 				for _, table := range source.Tables {
 					sourceMap[source.Name.Value].Tables[table.Name.Value] = SourceTable{
 						Name:        table.Name.Value,
-						Description: replaceDescriptionDocsBlocks(table.Description.Value, docsMap),
+						Description: jinja.ReplaceDocBlocks(table.Description.Value, docsMap),
 						Table:       source.Name.Value,
 						URI:         file,
 						Range: lsp.Range{
@@ -265,22 +265,3 @@ func parseYamlModels(projectRoot string, projYaml DbtProjectYaml) (map[string]Mo
 	return modelMap, sourceMap
 }
 
-func replaceDescriptionDocsBlocks(description string, docsMap map[string]Docs) string {
-	docBlocksRegex := regexp.MustCompile(`{{\s*doc\(('|")([-zA-z]+)('|")\)\s*}}`)
-
-	matches := docBlocksRegex.FindAllStringSubmatchIndex(description, -1)
-	if len(matches) == 0 {
-		return description
-	}
-
-	newDescription := description
-	for i := 0; i < len(matches); i++ {
-		docName := description[matches[i][4]:matches[i][5]]
-
-		if _, ok := docsMap[docName]; ok {
-			newDescription = newDescription[:matches[i][0]] + docsMap[docName].Content + newDescription[matches[i][1]:]
-		}
-	}
-
-	return newDescription
-}

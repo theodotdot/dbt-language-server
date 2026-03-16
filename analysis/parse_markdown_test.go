@@ -2,9 +2,11 @@ package analysis
 
 import (
 	"testing"
+
+	"github.com/j-clemons/dbt-language-server/analysis/jinja"
 )
 
-func TestGetDocsFileContents(t *testing.T) {
+func TestExtractDocsBlocks(t *testing.T) {
 	docsFileStr := `
 {% docs table_events %}
 
@@ -12,32 +14,12 @@ This table contains clickstream events from the marketing website.
 
 {% enddocs %}
 `
-	testCases := []struct {
-		name     string
-		fileStr  string
-		expected []Docs
-	}{
-		{
-			name:    "Example Doc File",
-			fileStr: docsFileStr,
-			expected: []Docs{
-				Docs{
-					Name:    "table_events",
-					Content: "This table contains clickstream events from the marketing website.",
-				},
-			},
-		},
-	}
+	result := jinja.ExtractDocsBlocks(docsFileStr)
 
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			result := getDocsFileContents(tc.fileStr)
-			for i, e := range tc.expected {
-				if e != result[i] {
-					t.Errorf("input: %v; got: %v; want: %v",
-						tc.fileStr, result[i], e)
-				}
-			}
-		})
+	expected := "This table contains clickstream events from the marketing website."
+	if content, ok := result["table_events"]; !ok {
+		t.Error("expected 'table_events' in result")
+	} else if content != expected {
+		t.Errorf("got %q, want %q", content, expected)
 	}
 }

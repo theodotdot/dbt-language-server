@@ -203,6 +203,58 @@ from {{ ref('users') }}`
 
 }
 
+func TestSetVariableTracking(t *testing.T) {
+	input := `{% set my_var = ref('users') %}
+{% set count = 42 %}
+select {{ my_var }}, {{ count }} from table1`
+
+	p := Parse(input, docs.Dialect("snowflake"))
+	tokenNameMap := p.CreateTokenNameMap()
+
+	if tok, ok := tokenNameMap["my_var"]; !ok {
+		t.Fatal("set variable 'my_var' not found in token name map")
+	} else if tok.Type != JINJA_SET {
+		t.Fatalf("expected JINJA_SET type, got %s", tok.Type)
+	} else if tok.Line != 0 || tok.Column != 7 {
+		t.Fatalf("expected my_var at (0, 7), got (%d, %d)", tok.Line, tok.Column)
+	}
+
+	if tok, ok := tokenNameMap["count"]; !ok {
+		t.Fatal("set variable 'count' not found in token name map")
+	} else if tok.Type != JINJA_SET {
+		t.Fatalf("expected JINJA_SET type, got %s", tok.Type)
+	}
+}
+
+func TestParseJinjaBlockNonSet(t *testing.T) {
+	input := `{% if condition %}
+select * from {{ ref('users') }}
+{% endif %}`
+
+	p := Parse(input, docs.Dialect("snowflake"))
+	tokens := p.tokens
+
+	// The jinja block tokens should be consumed (JINJA_LBRACE, JINJA_RBRACE)
+	// but the content inside {% if %} should be skipped until %}
+	// The ref on line 1 should still be parsed normally
+	refFound := false
+	for _, t := range tokens {
+		if t.Token.Type == REF && t.Token.Literal == "users" {
+			refFound = true
+		}
+	}
+
+	if !refFound {
+		t.Fatal("expected REF token for 'users' after jinja block")
+	}
+
+	// set vars should be empty since this is an if block, not set
+	nameMap := p.CreateTokenNameMap()
+	if len(nameMap) != 0 {
+		t.Fatalf("expected empty token name map for if block, got %v", nameMap)
+	}
+}
+
 func TestParseJinjaStatementBlocks(t *testing.T) {
 	input := `{% set v = var('variable_name') %}
 select * from {{ ref('users') }}`
@@ -210,7 +262,7 @@ select * from {{ ref('users') }}`
 	expected := []Token{
 		{Type: JINJA_LBRACE, Literal: "{%", Line: 0, Column: 0},
 		{Type: SET, Literal: "set", Line: 0, Column: 3},
-		{Type: IDENT, Literal: "v", Line: 0, Column: 7},
+		{Type: JINJA_SET, Literal: "v", Line: 0, Column: 7},
 		{Type: EQUAL, Literal: "=", Line: 0, Column: 9},
 		{Type: VAR, Literal: "var", Line: 0, Column: 11},
 		{Type: LPAREN, Literal: "(", Line: 0, Column: 14},

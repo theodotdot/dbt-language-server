@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 
@@ -11,6 +12,13 @@ import (
 	"github.com/j-clemons/dbt-language-server/docs"
 	"github.com/j-clemons/dbt-language-server/lsp"
 	"github.com/j-clemons/dbt-language-server/util"
+)
+
+var (
+	refTriggerRegex        = regexp.MustCompile(`\bref\(('|")[a-zA-Z]*$`)
+	sourceTriggerRegex     = regexp.MustCompile(`\bsource\(('|")[a-zA-Z]*$`)
+	varTriggerRegex        = regexp.MustCompile(`\bvar\(('|")[a-zA-Z]*$`)
+	jinjaBlockTriggerRegex = regexp.MustCompile(`\{\{\s*`)
 )
 
 type State struct {
@@ -325,7 +333,7 @@ func (s *State) Definition(id int, uri string, position lsp.Position) lsp.Defini
 			packageName = Package(tokenLiteral)
 		}
 		macro := s.DbtContext.MacroDetailMap[packageName][cursorToken.Literal]
-		if macro != (Macro{}) {
+		if macro.Name != "" {
 			response.Result.URI = "file://" + macro.URI
 			response.Result.Range = macro.Range
 		}
@@ -421,28 +429,23 @@ func (s *State) TextDocumentCompletion(id int, uri string, position lsp.Position
 	textBeforeCursor := lineText[:cursorOffset]
 	textAfterCursor := lineText[cursorOffset:]
 
-	refRegex := regexp.MustCompile(`\bref\(('|")[a-zA-z]*$`)
-	sourceRegex := regexp.MustCompile(`\bsource\(('|")[a-zA-z]*$`)
-	varRegex := regexp.MustCompile(`\bvar\(('|")[a-zA-z]*$`)
-	jinjaBlockRegex := regexp.MustCompile(`\{\{\s*`)
-
-	if refRegex.MatchString(textBeforeCursor) {
+	if refTriggerRegex.MatchString(textBeforeCursor) {
 		items = getRefCompletionItems(
 			s.DbtContext.ModelDetailMap,
 			getSuffix(lineText, textAfterCursor, "ref"),
 		)
-	} else if sourceRegex.MatchString(textBeforeCursor) {
+	} else if sourceTriggerRegex.MatchString(textBeforeCursor) {
 		items = getSourceCompletionItems(
 			s.DbtContext.SourceDetailMap,
 			getSuffix(lineText, textAfterCursor, "source"),
 			getQuoteType(lineText),
 		)
-	} else if varRegex.MatchString(textBeforeCursor) {
+	} else if varTriggerRegex.MatchString(textBeforeCursor) {
 		items = getVariableCompletionItems(
 			s.DbtContext.VariableDetailMap,
 			getSuffix(lineText, textAfterCursor, "var"),
 		)
-	} else if jinjaBlockRegex.MatchString(textBeforeCursor) {
+	} else if jinjaBlockTriggerRegex.MatchString(textBeforeCursor) {
 		items = getMacroCompletionItems(s.DbtContext.MacroDetailMap, s.DbtContext.ProjectYaml)
 	} else {
 		items = s.DbtContext.Dialect.FunctionCompletionItems()
@@ -456,5 +459,94 @@ func (s *State) TextDocumentCompletion(id int, uri string, position lsp.Position
 		Result: items,
 	}
 
+	return response
+}
+
+const (
+	semFunction = iota
+	semMacro
+	semVariable
+	semNamespace
+	semKeyword
+	semOperator
+)
+
+func tokenToSemanticType(tokenType parser.TokenType) (int, bool) {
+	switch tokenType {
+	case parser.REF, parser.SOURCE, parser.VAR, parser.CONFIG:
+		return semFunction, true
+	case parser.MACRO:
+		return semMacro, true
+	case parser.JINJA_SET:
+		return semVariable, true
+	case parser.PACKAGE:
+		return semNamespace, true
+	case parser.DB_LBRACE, parser.DB_RBRACE, parser.JINJA_LBRACE, parser.JINJA_RBRACE:
+		return semOperator, true
+	case parser.SET:
+		return semKeyword, true
+	default:
+		return 0, false
+	}
+}
+
+func (s *State) SemanticTokensFull(id int, uri string) lsp.SemanticTokensResponse {
+	response := lsp.SemanticTokensResponse{
+		Response: lsp.Response{
+			RPC: "2.0",
+			ID:  &id,
+		},
+		Result: lsp.SemanticTokensResult{
+			Data: []int{},
+		},
+	}
+
+	doc, exists := s.Documents[uri]
+	if !exists || doc.Tokens == nil {
+		return response
+	}
+
+	type semToken struct {
+		line, col, length, tokenType int
+	}
+
+	var tokens []semToken
+	for line, lineTokens := range doc.Tokens.LineTokens() {
+		for _, tll := range lineTokens {
+			tokenType, ok := tokenToSemanticType(tll.Token.Type)
+			if !ok {
+				continue
+			}
+			tokens = append(tokens, semToken{
+				line:      line,
+				col:       tll.Token.Column,
+				length:    len(tll.Token.Literal),
+				tokenType: tokenType,
+			})
+		}
+	}
+
+	sort.Slice(tokens, func(i, j int) bool {
+		if tokens[i].line != tokens[j].line {
+			return tokens[i].line < tokens[j].line
+		}
+		return tokens[i].col < tokens[j].col
+	})
+
+	data := make([]int, 0, len(tokens)*5)
+	prevLine := 0
+	prevCol := 0
+	for _, tok := range tokens {
+		deltaLine := tok.line - prevLine
+		deltaCol := tok.col
+		if deltaLine == 0 {
+			deltaCol = tok.col - prevCol
+		}
+		data = append(data, deltaLine, deltaCol, tok.length, tok.tokenType, 0)
+		prevLine = tok.line
+		prevCol = tok.col
+	}
+
+	response.Result.Data = data
 	return response
 }

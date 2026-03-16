@@ -13,6 +13,7 @@ type Parser struct {
 	peekTok Token
 	tokens  []TokenLL
 	ctes    CTE
+	setVars map[string]Token
 }
 
 type CTE struct {
@@ -35,6 +36,7 @@ func NewParser(input string, dialect docs.Dialect) *Parser {
 			ParenCount: -1,
 			Tokens:     []Token{},
 		},
+		setVars: make(map[string]Token),
 	}
 }
 
@@ -151,6 +153,33 @@ func (p *Parser) parseConfig() {
 	}
 }
 
+func (p *Parser) parseJinjaBlock() {
+	p.NextToken()
+	switch p.curTok.Type {
+	case SET:
+		p.NextToken()
+		if p.curTok.Type == IDENT {
+			p.curTok.Type = JINJA_SET
+			p.setVars[p.curTok.Literal] = p.curTok
+		}
+		for p.curTok.Type != JINJA_RBRACE && p.curTok.Type != EOF {
+			switch p.curTok.Type {
+			case REF:
+				p.parseRef()
+			case VAR:
+				p.parseVar()
+			case SOURCE:
+				p.parseSource()
+			}
+			p.NextToken()
+		}
+	default:
+		for p.curTok.Type != JINJA_RBRACE && p.curTok.Type != EOF {
+			p.NextToken()
+		}
+	}
+}
+
 func (p *Parser) incParenCount() {
 	if p.ctes.Ind {
 		p.ctes.ParenCount++
@@ -199,6 +228,7 @@ func (p *Parser) parseTokens() {
 				p.parseMacro()
 			}
 		case JINJA_LBRACE:
+			p.parseJinjaBlock()
 		case DB_RBRACE:
 		case JINJA_RBRACE:
 		}
@@ -210,6 +240,9 @@ func (p *Parser) CreateTokenNameMap() map[string]Token {
 	tokenMap := make(map[string]Token)
 	for _, token := range p.ctes.Tokens {
 		tokenMap[token.Literal] = token
+	}
+	for name, token := range p.setVars {
+		tokenMap[name] = token
 	}
 	return tokenMap
 }
@@ -228,6 +261,10 @@ func (p *Parser) CreateTokenIndex() *TokenIndex {
 	}
 
 	return index
+}
+
+func (ti *TokenIndex) LineTokens() map[int][]TokenLL {
+	return ti.lineTokens
 }
 
 func (ti *TokenIndex) FindTokenAtCursor(line, column int) (*TokenLL, error) {

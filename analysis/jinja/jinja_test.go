@@ -1,4 +1,4 @@
-package util
+package jinja
 
 import (
 	"os"
@@ -61,12 +61,66 @@ func TestResolveEnvVars(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := ResolveEnvVars(tt.input)
-			if result != tt.expected {
-				t.Errorf("expected %q but got %q", tt.expected, result)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := ResolveEnvVars(tc.input)
+			if result != tc.expected {
+				t.Errorf("got %q, want %q", result, tc.expected)
 			}
 		})
+	}
+}
+
+func TestReplaceDocBlocks(t *testing.T) {
+	docsContent := map[string]string{
+		"my-doc": "This is the doc content",
+	}
+
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "replace doc block",
+			input:    `{{ doc("my-doc") }}`,
+			expected: "This is the doc content",
+		},
+		{
+			name:     "no doc blocks",
+			input:    "plain description",
+			expected: "plain description",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := ReplaceDocBlocks(tc.input, docsContent)
+			if result != tc.expected {
+				t.Errorf("got %q, want %q", result, tc.expected)
+			}
+		})
+	}
+}
+
+func TestExtractDocsBlocks(t *testing.T) {
+	input := `{% docs my_doc %}
+This is documentation content.
+{% enddocs %}
+
+{% docs another_doc %}
+More content here.
+{% enddocs %}`
+
+	result := ExtractDocsBlocks(input)
+
+	if content, ok := result["my_doc"]; !ok {
+		t.Error("expected 'my_doc' in result")
+	} else if content != "This is documentation content." {
+		t.Errorf("my_doc content = %q, want %q", content, "This is documentation content.")
+	}
+
+	if _, ok := result["another_doc"]; !ok {
+		t.Error("expected 'another_doc' in result")
 	}
 }

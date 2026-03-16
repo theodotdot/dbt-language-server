@@ -255,6 +255,7 @@ func expectedTestState() State {
 						Name:        "add_values",
 						ProjectName: "jaffle_package",
 						Description: "add_values(arg1, arg2)",
+						Arguments:   []MacroArg{{Name: "arg1"}, {Name: "arg2"}},
 						URI:         filepath.Join(testdataRoot, "dbt_packages/jaffle_package/macros/jaffle_package_macros.sql"),
 						Range: lsp.Range{
 							Start: lsp.Position{
@@ -273,6 +274,7 @@ func expectedTestState() State {
 						Name:        "full_name",
 						ProjectName: "jaffle_shop",
 						Description: "full_name(first_name, last_name)",
+						Arguments:   []MacroArg{{Name: "first_name"}, {Name: "last_name"}},
 						URI:         filepath.Join(testdataRoot, "macros/jaffle_macros.sql"),
 						Range: lsp.Range{
 							Start: lsp.Position{
@@ -289,6 +291,7 @@ func expectedTestState() State {
 						Name:        "times_five",
 						ProjectName: "jaffle_shop",
 						Description: "times_five(int_value)",
+						Arguments:   []MacroArg{{Name: "int_value"}},
 						URI:         filepath.Join(testdataRoot, "macros/jaffle_macros.sql"),
 						Range: lsp.Range{
 							Start: lsp.Position{

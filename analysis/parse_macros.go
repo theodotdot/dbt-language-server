@@ -2,39 +2,87 @@ package analysis
 
 import (
 	"os"
-	"regexp"
 	"strings"
 
+	"github.com/j-clemons/dbt-language-server/analysis/jinja"
 	"github.com/j-clemons/dbt-language-server/lsp"
 	"github.com/j-clemons/dbt-language-server/util"
 )
+
+type MacroArg struct {
+	Name    string
+	Default string
+}
 
 type Macro struct {
 	Name        string
 	ProjectName Package
 	Description string
+	Arguments   []MacroArg
 	URI         string
 	Range       lsp.Range
 }
 
+func parseMacroArgs(argsStr string) []MacroArg {
+	argsStr = strings.TrimSpace(argsStr)
+	if argsStr == "" {
+		return nil
+	}
+
+	parts := strings.Split(argsStr, ",")
+	args := make([]MacroArg, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if eqIdx := strings.Index(part, "="); eqIdx != -1 {
+			name := strings.TrimSpace(part[:eqIdx])
+			def := strings.TrimSpace(part[eqIdx+1:])
+			args = append(args, MacroArg{Name: name, Default: def})
+		} else {
+			args = append(args, MacroArg{Name: part})
+		}
+	}
+	return args
+}
+
+func formatMacroSignature(name string, args []MacroArg) string {
+	var b strings.Builder
+	b.WriteString(name)
+	b.WriteByte('(')
+	for i, arg := range args {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		b.WriteString(arg.Name)
+		if arg.Default != "" {
+			b.WriteByte('=')
+			b.WriteString(arg.Default)
+		}
+	}
+	b.WriteByte(')')
+	return b.String()
+}
+
 func getMacrosFromFile(fileStr string, fileUri string, dbtProjectYaml DbtProjectYaml) []Macro {
-	macroDescRegex := regexp.MustCompile(`(?s)\{%-{0,1}\s*macro\s+(\w+\(.*?\))\s*-{0,1}%\}`)
-	macroMatches := macroDescRegex.FindAllStringSubmatchIndex(fileStr, -1)
+	macroMatches := jinja.MacroDefRegex.FindAllStringSubmatchIndex(fileStr, -1)
 
 	macros := []Macro{}
 	for _, m := range macroMatches {
-		macroNameIdx := strings.Index(fileStr[m[2]:m[3]], "(")
-		if macroNameIdx == -1 {
-			continue
-		}
+		macroName := fileStr[m[2]:m[3]]
+		argsStr := fileStr[m[4]:m[5]]
+		args := parseMacroArgs(argsStr)
+
 		startLine, startCol := util.GetLineAndColumn(fileStr, m[2])
-		endLine, endCol := util.GetLineAndColumn(fileStr, m[3])
+		endLine, endCol := util.GetLineAndColumn(fileStr, m[5]+1) // end after closing paren
 		macros = append(
 			macros,
 			Macro{
-				Name:        fileStr[m[2]:m[3]][:macroNameIdx],
+				Name:        macroName,
 				ProjectName: Package(dbtProjectYaml.ProjectName.Value),
-				Description: fileStr[m[2]:m[3]],
+				Description: formatMacroSignature(macroName, args),
+				Arguments:   args,
 				URI:         fileUri,
 				Range: lsp.Range{
 					Start: lsp.Position{

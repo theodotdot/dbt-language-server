@@ -136,6 +136,61 @@ func TestGetVariableSuffix(t *testing.T) {
 	}
 }
 
+func TestBuildMacroSnippet(t *testing.T) {
+	tests := []struct {
+		name     string
+		prefix   string
+		args     []MacroArg
+		expected string
+	}{
+		{
+			name:     "no args",
+			prefix:   "my_macro",
+			args:     nil,
+			expected: "my_macro()",
+		},
+		{
+			name:     "single arg",
+			prefix:   "my_macro",
+			args:     []MacroArg{{Name: "arg1"}},
+			expected: "my_macro(${1:arg1})",
+		},
+		{
+			name:     "multiple args",
+			prefix:   "my_macro",
+			args:     []MacroArg{{Name: "a"}, {Name: "b"}},
+			expected: "my_macro(${1:a}, ${2:b})",
+		},
+		{
+			name:     "args with defaults",
+			prefix:   "my_macro",
+			args:     []MacroArg{{Name: "a"}, {Name: "b", Default: "42"}},
+			expected: "my_macro(${1:a}, ${2:42})",
+		},
+		{
+			name:     "all args with defaults",
+			prefix:   "m",
+			args:     []MacroArg{{Name: "x", Default: "'hello'"}, {Name: "y", Default: "none"}},
+			expected: "m(${1:'hello'}, ${2:none})",
+		},
+		{
+			name:     "package prefix",
+			prefix:   "pkg.my_macro",
+			args:     []MacroArg{{Name: "val"}},
+			expected: "pkg.my_macro(${1:val})",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := buildMacroSnippet(tc.prefix, tc.args)
+			if result != tc.expected {
+				t.Errorf("got %q, want %q", result, tc.expected)
+			}
+		})
+	}
+}
+
 func TestGetMacroCompletionItems(t *testing.T) {
 	testState := expectedTestState()
 
@@ -146,28 +201,31 @@ func TestGetMacroCompletionItems(t *testing.T) {
 
 	expectedCompletionItems := []lsp.CompletionItem{
 		{
-			Label:         "add_values",
-			Detail:        "Project: jaffle_package",
-			Documentation: "add_values(arg1, arg2)",
-			Kind:          completionKind.Snippet,
-			InsertText:    "jaffle_package.add_values",
-			SortText:      "add_values",
+			Label:            "add_values",
+			Detail:           "Project: jaffle_package",
+			Documentation:    "add_values(arg1, arg2)",
+			Kind:             completionKind.Snippet,
+			InsertText:       "jaffle_package.add_values(${1:arg1}, ${2:arg2})",
+			InsertTextFormat: 2,
+			SortText:         "add_values",
 		},
 		{
-			Label:         "full_name",
-			Detail:        "Project: jaffle_shop",
-			Documentation: "full_name(first_name, last_name)",
-			Kind:          completionKind.Snippet,
-			InsertText:    "full_name",
-			SortText:      "full_name",
+			Label:            "full_name",
+			Detail:           "Project: jaffle_shop",
+			Documentation:    "full_name(first_name, last_name)",
+			Kind:             completionKind.Snippet,
+			InsertText:       "full_name(${1:first_name}, ${2:last_name})",
+			InsertTextFormat: 2,
+			SortText:         "full_name",
 		},
 		{
-			Label:         "times_five",
-			Detail:        "Project: jaffle_shop",
-			Documentation: "times_five(int_value)",
-			Kind:          completionKind.Snippet,
-			InsertText:    "times_five",
-			SortText:      "times_five",
+			Label:            "times_five",
+			Detail:           "Project: jaffle_shop",
+			Documentation:    "times_five(int_value)",
+			Kind:             completionKind.Snippet,
+			InsertText:       "times_five(${1:int_value})",
+			InsertTextFormat: 2,
+			SortText:         "times_five",
 		},
 	}
 

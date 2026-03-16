@@ -58,6 +58,7 @@ const (
 	MACRO        = "MACRO"
 	PACKAGE      = "PACKAGE"
 	CONFIG       = "CONFIG"
+	JINJA_SET = "JINJA_SET"
 
 	//                keywords
 	ACCOUNT           = "ACCOUNT"
