@@ -241,3 +241,97 @@ func TestGetMacroCompletionItems(t *testing.T) {
 		t.Fatalf("expected %v,\n\ngot %v", expectedCompletionItems, actualCompletionItems)
 	}
 }
+
+func TestGetColumnCompletionItems(t *testing.T) {
+	modelMap := map[string]ModelDetails{
+		"customers": {
+			Columns: []Column{
+				{Name: "customer_id", Description: "Unique ID"},
+				{Name: "first_name", Description: "First name"},
+			},
+		},
+		"orders": {
+			Columns: []Column{
+				{Name: "order_id", Description: "Order ID"},
+				{Name: "customer_id", Description: "FK to customers"},
+			},
+		},
+		"empty_model": {},
+	}
+
+	t.Run("single model", func(t *testing.T) {
+		items := getColumnCompletionItems([]string{"customers"}, modelMap)
+		if len(items) != 2 {
+			t.Fatalf("expected 2 items, got %d", len(items))
+		}
+		if items[0].Kind != completionKind.Field {
+			t.Errorf("expected Field kind, got %d", items[0].Kind)
+		}
+	})
+
+	t.Run("multiple models with dedup", func(t *testing.T) {
+		items := getColumnCompletionItems([]string{"customers", "orders"}, modelMap)
+		if len(items) != 3 {
+			t.Fatalf("expected 3 items, got %d", len(items))
+		}
+		names := map[string]bool{}
+		for _, item := range items {
+			names[item.Label] = true
+		}
+		for _, expected := range []string{"customer_id", "first_name", "order_id"} {
+			if !names[expected] {
+				t.Errorf("missing expected column %q", expected)
+			}
+		}
+	})
+
+	t.Run("no columns", func(t *testing.T) {
+		items := getColumnCompletionItems([]string{"empty_model"}, modelMap)
+		if len(items) != 0 {
+			t.Fatalf("expected 0 items, got %d", len(items))
+		}
+	})
+
+	t.Run("unknown model", func(t *testing.T) {
+		items := getColumnCompletionItems([]string{"nonexistent"}, modelMap)
+		if len(items) != 0 {
+			t.Fatalf("expected 0 items, got %d", len(items))
+		}
+	})
+
+	t.Run("nil model names", func(t *testing.T) {
+		items := getColumnCompletionItems(nil, modelMap)
+		if len(items) != 0 {
+			t.Fatalf("expected 0 items, got %d", len(items))
+		}
+	})
+
+	t.Run("dedup preserves first model detail", func(t *testing.T) {
+		items := getColumnCompletionItems([]string{"customers", "orders"}, modelMap)
+		for _, item := range items {
+			if item.Label == "customer_id" {
+				if item.Detail != "Column from customers" {
+					t.Errorf("expected Detail from first model, got %q", item.Detail)
+				}
+				if item.Documentation != "Unique ID" {
+					t.Errorf("expected Description from first model, got %q", item.Documentation)
+				}
+				return
+			}
+		}
+		t.Error("customer_id not found")
+	})
+
+	t.Run("empty description", func(t *testing.T) {
+		m := map[string]ModelDetails{
+			"stg": {Columns: []Column{{Name: "id", Description: ""}}},
+		}
+		items := getColumnCompletionItems([]string{"stg"}, m)
+		if len(items) != 1 {
+			t.Fatalf("expected 1 item, got %d", len(items))
+		}
+		if items[0].Documentation != "" {
+			t.Errorf("expected empty documentation, got %q", items[0].Documentation)
+		}
+	})
+}

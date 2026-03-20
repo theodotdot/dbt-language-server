@@ -294,7 +294,7 @@ func (s *State) Definition(id int, uri string, position lsp.Position) lsp.Defini
 	switch cursorToken.Type {
 	case parser.REF:
 		model := s.DbtContext.ModelDetailMap[cursorToken.Literal]
-		if model != (ModelDetails{}) {
+		if model.URI != "" {
 			response.Result.URI = "file://" + model.URI
 			response.Result.Range = lsp.Range{
 				Start: lsp.Position{
@@ -420,6 +420,23 @@ func getModelNameFromURI(uri string) string {
 	return ""
 }
 
+func getReferencedModels(tokens *parser.TokenIndex) []string {
+	if tokens == nil {
+		return nil
+	}
+	seen := make(map[string]bool)
+	var models []string
+	for _, lineTokens := range tokens.LineTokens() {
+		for _, tll := range lineTokens {
+			if tll.Token.Type == parser.REF && tll.Token.Literal != "ref" && !seen[tll.Token.Literal] {
+				seen[tll.Token.Literal] = true
+				models = append(models, tll.Token.Literal)
+			}
+		}
+	}
+	return models
+}
+
 func (s *State) TextDocumentCompletion(id int, uri string, position lsp.Position) lsp.CompletionResponse {
 	items := []lsp.CompletionItem{}
 
@@ -450,7 +467,9 @@ func (s *State) TextDocumentCompletion(id int, uri string, position lsp.Position
 	} else if jinjaBlockTriggerRegex.MatchString(textBeforeCursor) {
 		items = getMacroCompletionItems(s.DbtContext.MacroDetailMap, s.DbtContext.ProjectYaml)
 	} else {
-		items = s.DbtContext.Dialect.FunctionCompletionItems()
+		refModels := getReferencedModels(s.Documents[uri].Tokens)
+		items = getColumnCompletionItems(refModels, s.DbtContext.ModelDetailMap)
+		items = append(items, s.DbtContext.Dialect.FunctionCompletionItems()...)
 	}
 
 	response := lsp.CompletionResponse{

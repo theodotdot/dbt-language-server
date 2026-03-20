@@ -7,6 +7,7 @@ import (
 	"github.com/j-clemons/dbt-language-server/analysis/parser"
 	"github.com/j-clemons/dbt-language-server/docs"
 	"github.com/j-clemons/dbt-language-server/lsp"
+	"github.com/j-clemons/dbt-language-server/lsp/completionKind"
 )
 
 func newTestState() *State {
@@ -20,6 +21,10 @@ func newTestState() *State {
 			URI:         "/test/models/customers.sql",
 			ProjectName: "test_project",
 			Description: "Customer model description",
+			Columns: []Column{
+				{Name: "customer_id", Description: "Unique customer identifier"},
+				{Name: "first_name", Description: "Customer first name"},
+			},
 		},
 	}
 	s.DbtContext.SourceDetailMap = map[string]Source{
@@ -345,6 +350,69 @@ select {{ my_var }}`)
 	}
 }
 
+func TestGetReferencedModels(t *testing.T) {
+	state := newTestState()
+	uri := "test://ref.sql"
+
+	tests := []struct {
+		name     string
+		sql      string
+		expected []string
+	}{
+		{
+			name:     "single ref",
+			sql:      "select * from {{ ref('customers') }}",
+			expected: []string{"customers"},
+		},
+		{
+			name:     "multiple refs",
+			sql:      "select * from {{ ref('customers') }} join {{ ref('orders') }}",
+			expected: []string{"customers", "orders"},
+		},
+		{
+			name:     "duplicate ref",
+			sql:      "{{ ref('customers') }} union {{ ref('customers') }}",
+			expected: []string{"customers"},
+		},
+		{
+			name:     "no refs",
+			sql:      "select * from my_table",
+			expected: nil,
+		},
+		{
+			name:     "ref on different lines",
+			sql:      "select * from {{ ref('customers') }}\njoin {{ ref('orders') }} on true",
+			expected: []string{"customers", "orders"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			state.parseDocument(uri, tc.sql)
+			models := getReferencedModels(state.Documents[uri].Tokens)
+			if len(models) != len(tc.expected) {
+				t.Fatalf("expected %d models, got %d: %v", len(tc.expected), len(models), models)
+			}
+			got := make(map[string]bool)
+			for _, m := range models {
+				got[m] = true
+			}
+			for _, e := range tc.expected {
+				if !got[e] {
+					t.Errorf("missing expected model %q", e)
+				}
+			}
+		})
+	}
+
+	t.Run("nil tokens", func(t *testing.T) {
+		models := getReferencedModels(nil)
+		if models != nil {
+			t.Errorf("expected nil, got %v", models)
+		}
+	})
+}
+
 func TestTextDocumentCompletion(t *testing.T) {
 	state := newTestState()
 	uri := "test://completion.sql"
@@ -401,6 +469,63 @@ func TestTextDocumentCompletion(t *testing.T) {
 			checkItem: func(items []lsp.CompletionItem) bool {
 				for _, item := range items {
 					if item.Label == "my_macro" {
+						return true
+					}
+				}
+				return false
+			},
+		},
+		{
+			name: "column completion from ref'd model",
+			sql:  "select  from {{ ref('customers') }}",
+			pos:  lsp.Position{Line: 0, Character: 7},
+			checkItem: func(items []lsp.CompletionItem) bool {
+				for _, item := range items {
+					if item.Label == "customer_id" {
+						return true
+					}
+				}
+				return false
+			},
+		},
+		{
+			name: "no column completion without ref",
+			sql:  "select  from my_table",
+			pos:  lsp.Position{Line: 0, Character: 7},
+			checkItem: func(items []lsp.CompletionItem) bool {
+				for _, item := range items {
+					if item.Kind == completionKind.Field {
+						return false
+					}
+				}
+				return true
+			},
+		},
+		{
+			name: "column completion includes sql functions",
+			sql:  "select  from {{ ref('customers') }}",
+			pos:  lsp.Position{Line: 0, Character: 7},
+			checkItem: func(items []lsp.CompletionItem) bool {
+				hasColumn := false
+				hasFunction := false
+				for _, item := range items {
+					if item.Kind == completionKind.Field {
+						hasColumn = true
+					}
+					if item.Kind == completionKind.Function {
+						hasFunction = true
+					}
+				}
+				return hasColumn && hasFunction
+			},
+		},
+		{
+			name: "column completion multiline ref",
+			sql:  "select \nfrom {{ ref('customers') }}",
+			pos:  lsp.Position{Line: 0, Character: 7},
+			checkItem: func(items []lsp.CompletionItem) bool {
+				for _, item := range items {
+					if item.Label == "first_name" {
 						return true
 					}
 				}

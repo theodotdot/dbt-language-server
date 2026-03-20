@@ -30,6 +30,15 @@ func TestParsePropertiesYamlFile(t *testing.T) {
 					Position: lsp.Position{Line: 4, Character: 17},
 				},
 				ModelConfig: AnnotatedMap(nil),
+				Columns: []ColumnProperties{
+					{Name: AnnotatedField[string]{Value: "customer_id", Position: lsp.Position{Line: 7, Character: 14}}, Description: AnnotatedField[string]{Value: "This is a unique identifier for a customer", Position: lsp.Position{Line: 8, Character: 21}}},
+					{Name: AnnotatedField[string]{Value: "first_name", Position: lsp.Position{Line: 13, Character: 14}}, Description: AnnotatedField[string]{Value: "Customer's first name. PII.", Position: lsp.Position{Line: 14, Character: 21}}},
+					{Name: AnnotatedField[string]{Value: "last_name", Position: lsp.Position{Line: 16, Character: 14}}, Description: AnnotatedField[string]{Value: "Customer's last name. PII.", Position: lsp.Position{Line: 17, Character: 21}}},
+					{Name: AnnotatedField[string]{Value: "first_order", Position: lsp.Position{Line: 19, Character: 14}}, Description: AnnotatedField[string]{Value: "Date (UTC) of a customer's first order", Position: lsp.Position{Line: 20, Character: 21}}},
+					{Name: AnnotatedField[string]{Value: "most_recent_order", Position: lsp.Position{Line: 22, Character: 14}}, Description: AnnotatedField[string]{Value: "Date (UTC) of a customer's most recent order", Position: lsp.Position{Line: 23, Character: 21}}},
+					{Name: AnnotatedField[string]{Value: "number_of_orders", Position: lsp.Position{Line: 25, Character: 14}}, Description: AnnotatedField[string]{Value: "Count of the number of orders a customer has placed", Position: lsp.Position{Line: 26, Character: 21}}},
+					{Name: AnnotatedField[string]{Value: "total_order_amount", Position: lsp.Position{Line: 28, Character: 14}}, Description: AnnotatedField[string]{Value: "Total value (AUD) of a customer's orders", Position: lsp.Position{Line: 29, Character: 21}}},
+				},
 			},
 			{
 				Name: AnnotatedField[string]{
@@ -41,6 +50,17 @@ func TestParsePropertiesYamlFile(t *testing.T) {
 					Position: lsp.Position{Line: 32, Character: 17},
 				},
 				ModelConfig: AnnotatedMap(nil),
+				Columns: []ColumnProperties{
+					{Name: AnnotatedField[string]{Value: "order_id", Position: lsp.Position{Line: 35, Character: 14}}, Description: AnnotatedField[string]{Value: "This is a unique identifier for an order", Position: lsp.Position{Line: 39, Character: 21}}},
+					{Name: AnnotatedField[string]{Value: "customer_id", Position: lsp.Position{Line: 41, Character: 14}}, Description: AnnotatedField[string]{Value: "Foreign key to the customers table", Position: lsp.Position{Line: 42, Character: 21}}},
+					{Name: AnnotatedField[string]{Value: "order_date", Position: lsp.Position{Line: 49, Character: 14}}, Description: AnnotatedField[string]{Value: "Date (UTC) that the order was placed", Position: lsp.Position{Line: 50, Character: 21}}},
+					{Name: AnnotatedField[string]{Value: "status", Position: lsp.Position{Line: 52, Character: 14}}, Description: AnnotatedField[string]{Value: `{{ doc("orders_status") }}`, Position: lsp.Position{Line: 53, Character: 21}}},
+					{Name: AnnotatedField[string]{Value: "amount", Position: lsp.Position{Line: 58, Character: 14}}, Description: AnnotatedField[string]{Value: "Total amount (AUD) of the order", Position: lsp.Position{Line: 59, Character: 21}}},
+					{Name: AnnotatedField[string]{Value: "credit_card_amount", Position: lsp.Position{Line: 63, Character: 14}}, Description: AnnotatedField[string]{Value: "Amount of the order (AUD) paid for by credit card", Position: lsp.Position{Line: 64, Character: 21}}},
+					{Name: AnnotatedField[string]{Value: "coupon_amount", Position: lsp.Position{Line: 68, Character: 14}}, Description: AnnotatedField[string]{Value: "Amount of the order (AUD) paid for by coupon", Position: lsp.Position{Line: 69, Character: 21}}},
+					{Name: AnnotatedField[string]{Value: "bank_transfer_amount", Position: lsp.Position{Line: 73, Character: 14}}, Description: AnnotatedField[string]{Value: "Amount of the order (AUD) paid for by bank transfer", Position: lsp.Position{Line: 74, Character: 21}}},
+					{Name: AnnotatedField[string]{Value: "gift_card_amount", Position: lsp.Position{Line: 78, Character: 14}}, Description: AnnotatedField[string]{Value: "Amount of the order (AUD) paid for by gift card", Position: lsp.Position{Line: 79, Character: 21}}},
+				},
 			},
 		},
 		Sources: []SourceProperties{

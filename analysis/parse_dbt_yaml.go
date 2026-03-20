@@ -144,10 +144,16 @@ type PropertiesYaml struct {
 	Sources []SourceProperties `yaml:"sources"`
 }
 
+type ColumnProperties struct {
+	Name        AnnotatedField[string] `yaml:"name"`
+	Description AnnotatedField[string] `yaml:"description"`
+}
+
 type ModelProperties struct {
 	Name        AnnotatedField[string] `yaml:"name"`
 	Description AnnotatedField[string] `yaml:"description"`
 	ModelConfig AnnotatedMap           `yaml:"config"`
+	Columns     []ColumnProperties     `yaml:"columns"`
 	SchemaURI   string
 }
 
@@ -226,6 +232,7 @@ func parseYamlModels(projectRoot string, projYaml DbtProjectYaml) (map[string]Mo
 							},
 						},
 					},
+					Columns:   model.Columns,
 					SchemaURI: file,
 				}
 			}

@@ -142,6 +142,34 @@ func getVariableCompletionItems(variables map[string]Variable, suffix string) []
 	return items
 }
 
+func getColumnCompletionItems(modelNames []string, modelMap map[string]ModelDetails) []lsp.CompletionItem {
+	seen := make(map[string]bool)
+	items := make([]lsp.CompletionItem, 0)
+
+	for _, name := range modelNames {
+		model, ok := modelMap[name]
+		if !ok {
+			continue
+		}
+		for _, col := range model.Columns {
+			if seen[col.Name] {
+				continue
+			}
+			seen[col.Name] = true
+			items = append(items, lsp.CompletionItem{
+				Label:         col.Name,
+				Detail:        fmt.Sprintf("Column from %s", name),
+				Documentation: col.Description,
+				Kind:          completionKind.Field,
+				InsertText:    col.Name,
+				SortText:      col.Name,
+			})
+		}
+	}
+
+	return items
+}
+
 func getSourceCompletionItems(sources map[string]Source, suffix string, quoteType string) []lsp.CompletionItem {
 	items := make([]lsp.CompletionItem, 0, len(sources))
 

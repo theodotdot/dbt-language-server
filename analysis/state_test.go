@@ -113,6 +113,15 @@ func expectedTestState() State {
 						Start: lsp.Position{Line: 3, Character: 10},
 						End:   lsp.Position{Line: 3, Character: 10},
 					},
+					Columns: []Column{
+						{Name: "customer_id", Description: "This is a unique identifier for a customer"},
+						{Name: "first_name", Description: "Customer's first name. PII."},
+						{Name: "last_name", Description: "Customer's last name. PII."},
+						{Name: "first_order", Description: "Date (UTC) of a customer's first order"},
+						{Name: "most_recent_order", Description: "Date (UTC) of a customer's most recent order"},
+						{Name: "number_of_orders", Description: "Count of the number of orders a customer has placed"},
+						{Name: "total_order_amount", Description: "Total value (AUD) of a customer's orders"},
+					},
 				},
 				"orders": {
 					URI:         filepath.Join(testdataRoot, "models/orders.sql"),
@@ -122,6 +131,17 @@ func expectedTestState() State {
 					SchemaRange: lsp.Range{
 						Start: lsp.Position{Line: 31, Character: 10},
 						End:   lsp.Position{Line: 31, Character: 10},
+					},
+					Columns: []Column{
+						{Name: "order_id", Description: "This is a unique identifier for an order"},
+						{Name: "customer_id", Description: "Foreign key to the customers table"},
+						{Name: "order_date", Description: "Date (UTC) that the order was placed"},
+						{Name: "status", Description: `{{ doc("orders_status") }}`},
+						{Name: "amount", Description: "Total amount (AUD) of the order"},
+						{Name: "credit_card_amount", Description: "Amount of the order (AUD) paid for by credit card"},
+						{Name: "coupon_amount", Description: "Amount of the order (AUD) paid for by coupon"},
+						{Name: "bank_transfer_amount", Description: "Amount of the order (AUD) paid for by bank transfer"},
+						{Name: "gift_card_amount", Description: "Amount of the order (AUD) paid for by gift card"},
 					},
 				},
 				"stg_customer_status": {
@@ -143,6 +163,9 @@ func expectedTestState() State {
 						Start: lsp.Position{Line: 3, Character: 10},
 						End:   lsp.Position{Line: 3, Character: 10},
 					},
+					Columns: []Column{
+						{Name: "customer_id", Description: ""},
+					},
 				},
 				"stg_orders": {
 					URI:         filepath.Join(testdataRoot, "models/staging/stg_orders.sql"),
@@ -153,6 +176,10 @@ func expectedTestState() State {
 						Start: lsp.Position{Line: 10, Character: 10},
 						End:   lsp.Position{Line: 10, Character: 10},
 					},
+					Columns: []Column{
+						{Name: "order_id", Description: ""},
+						{Name: "status", Description: ""},
+					},
 				},
 				"stg_payments": {
 					URI:         filepath.Join(testdataRoot, "models/staging/stg_payments.sql"),
@@ -162,6 +189,10 @@ func expectedTestState() State {
 					SchemaRange: lsp.Range{
 						Start: lsp.Position{Line: 21, Character: 10},
 						End:   lsp.Position{Line: 21, Character: 10},
+					},
+					Columns: []Column{
+						{Name: "payment_id", Description: ""},
+						{Name: "payment_method", Description: ""},
 					},
 				},
 				"raw_customers": {

@@ -2,12 +2,18 @@ package analysis
 
 import "github.com/j-clemons/dbt-language-server/lsp"
 
+type Column struct {
+	Name        string
+	Description string
+}
+
 type ModelDetails struct {
 	URI         string
 	ProjectName string
 	Description string
 	SchemaURI   string
 	SchemaRange lsp.Range
+	Columns     []Column
 }
 
 type ProjectDetails struct {
@@ -48,6 +54,7 @@ func (s *State) getModelDetails() (map[string]ModelDetails, map[string]Source) {
 			description := ""
 			schemaURI := ""
 			schemaRange := lsp.Range{}
+			var columns []Column
 
 			if hasSchema {
 				description = schemaDetails.Description.Value
@@ -55,6 +62,12 @@ func (s *State) getModelDetails() (map[string]ModelDetails, map[string]Source) {
 				schemaRange = lsp.Range{
 					Start: schemaDetails.Name.Position,
 					End:   schemaDetails.Name.Position,
+				}
+				for _, col := range schemaDetails.Columns {
+					columns = append(columns, Column{
+						Name:        col.Name.Value,
+						Description: col.Description.Value,
+					})
 				}
 			}
 
@@ -64,6 +77,7 @@ func (s *State) getModelDetails() (map[string]ModelDetails, map[string]Source) {
 				Description: description,
 				SchemaURI:   schemaURI,
 				SchemaRange: schemaRange,
+				Columns:     columns,
 			}
 		}
 	}
