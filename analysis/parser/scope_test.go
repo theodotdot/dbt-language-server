@@ -351,3 +351,127 @@ func TestParseSelectItems(t *testing.T) {
 		})
 	}
 }
+
+func TestParseFromSources(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected []SourceRef
+	}{
+		{
+			name:  "simple table",
+			input: "select id from orders",
+			expected: []SourceRef{
+				{Kind: SourceKindTable, Name: "orders"},
+			},
+		},
+		{
+			name:  "aliased table implicit",
+			input: "select id from orders o",
+			expected: []SourceRef{
+				{Kind: SourceKindTable, Name: "orders", Alias: "o"},
+			},
+		},
+		{
+			name:  "aliased table explicit AS",
+			input: "select id from orders as o",
+			expected: []SourceRef{
+				{Kind: SourceKindTable, Name: "orders", Alias: "o"},
+			},
+		},
+		{
+			name:  "ref in FROM",
+			input: "select * from {{ ref('orders') }}",
+			expected: []SourceRef{
+				{Kind: SourceKindRef, Name: "orders"},
+			},
+		},
+		{
+			name:  "ref with alias",
+			input: "select * from {{ ref('orders') }} o",
+			expected: []SourceRef{
+				{Kind: SourceKindRef, Name: "orders", Alias: "o"},
+			},
+		},
+		{
+			name:  "source in FROM",
+			input: "select * from {{ source('stripe', 'payments') }}",
+			expected: []SourceRef{
+				{Kind: SourceKindSource, Name: "payments", SourceName: "stripe"},
+			},
+		},
+		{
+			name:  "JOIN produces two sources",
+			input: "select * from {{ ref('orders') }} o join {{ ref('customers') }} c on o.customer_id = c.id",
+			expected: []SourceRef{
+				{Kind: SourceKindRef, Name: "orders", Alias: "o"},
+				{Kind: SourceKindRef, Name: "customers", Alias: "c"},
+			},
+		},
+		{
+			name:  "self-join different aliases",
+			input: "select * from {{ ref('events') }} e1 join {{ ref('events') }} e2 on e1.id = e2.id",
+			expected: []SourceRef{
+				{Kind: SourceKindRef, Name: "events", Alias: "e1"},
+				{Kind: SourceKindRef, Name: "events", Alias: "e2"},
+			},
+		},
+		{
+			name:  "jinja if/else in FROM",
+			input: "select * from\n{% if true %}\n  {{ ref('orders_prod') }}\n{% else %}\n  {{ ref('orders_dev') }}\n{% endif %}",
+			expected: []SourceRef{
+				{Kind: SourceKindRef, Name: "orders_prod"},
+				{Kind: SourceKindRef, Name: "orders_dev"},
+			},
+		},
+		{
+			name:  "left join",
+			input: "select * from {{ ref('orders') }} o left join {{ ref('items') }} i on o.id = i.order_id right join {{ ref('users') }} u on o.user_id = u.id",
+			expected: []SourceRef{
+				{Kind: SourceKindRef, Name: "orders", Alias: "o"},
+				{Kind: SourceKindRef, Name: "items", Alias: "i"},
+				{Kind: SourceKindRef, Name: "users", Alias: "u"},
+			},
+		},
+		{
+			name:  "comma-separated FROM",
+			input: "select * from orders, customers",
+			expected: []SourceRef{
+				{Kind: SourceKindTable, Name: "orders"},
+				{Kind: SourceKindTable, Name: "customers"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := Parse(tt.input, docs.Dialect("snowflake"))
+			scope := p.CreateQueryScope()
+			if scope == nil {
+				t.Fatal("expected non-nil scope")
+			}
+			if len(scope.Sources) != len(tt.expected) {
+				names := make([]string, len(scope.Sources))
+				for i, s := range scope.Sources {
+					names[i] = s.Name
+				}
+				t.Fatalf("expected %d Sources, got %d: %v", len(tt.expected), len(scope.Sources), names)
+			}
+			for i, exp := range tt.expected {
+				got := scope.Sources[i]
+				if got.Kind != exp.Kind {
+					t.Errorf("source[%d] Kind: expected %d, got %d", i, exp.Kind, got.Kind)
+				}
+				if got.Name != exp.Name {
+					t.Errorf("source[%d] Name: expected %q, got %q", i, exp.Name, got.Name)
+				}
+				if got.Alias != exp.Alias {
+					t.Errorf("source[%d] Alias: expected %q, got %q", i, exp.Alias, got.Alias)
+				}
+				if exp.SourceName != "" && got.SourceName != exp.SourceName {
+					t.Errorf("source[%d] SourceName: expected %q, got %q", i, exp.SourceName, got.SourceName)
+				}
+			}
+		})
+	}
+}

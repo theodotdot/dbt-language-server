@@ -21,6 +21,8 @@ type Parser struct {
 	selectTokens   []Token
 	selectHasAS    bool
 	selectStarted  bool
+	// FROM/JOIN source tracking
+	lastSourceRef  *SourceRef
 }
 
 type CTE struct {
@@ -214,6 +216,7 @@ func (p *Parser) setClause(kind ClauseKind) {
 	if p.currentClause() == ClauseSelect {
 		p.finalizeSelectItem()
 	}
+	p.lastSourceRef = nil
 	p.clauseStack[len(p.clauseStack)-1] = kind
 	p.currentScope().ClauseRanges[kind] = p.curTok
 }
@@ -318,6 +321,32 @@ func (p *Parser) collectSelectToken() {
 	p.selectStarted = true
 }
 
+func (p *Parser) inFromJoinContext() bool {
+	clause := p.currentClause()
+	return clause == ClauseFrom || clause == ClauseJoin
+}
+
+func (p *Parser) isSourceAliasKeyword(tt TokenType) bool {
+	switch tt {
+	case ON, JOIN, WHERE, GROUP, ORDER, HAVING, LIMIT, UNION, SEMICOLON,
+		LEFT, RIGHT, INNER, CROSS, FULL, NATURAL, SELECT, EOF,
+		COMMA, RPAREN, JINJA_LBRACE, DB_LBRACE:
+		return true
+	}
+	return false
+}
+
+func (p *Parser) addSourceRef(kind SourceKind, name, sourceName string, tok Token) {
+	ref := &SourceRef{
+		Kind:       kind,
+		Name:       name,
+		SourceName: sourceName,
+		Token:      tok,
+	}
+	p.lastSourceRef = ref
+	p.currentScope().Sources = append(p.currentScope().Sources, ref)
+}
+
 func (p *Parser) parseTokens() {
 	for p.curTok.Type != EOF {
 		switch p.curTok.Type {
@@ -382,8 +411,28 @@ func (p *Parser) parseTokens() {
 			}
 		case SOURCE:
 			p.parseSource()
+			if p.inFromJoinContext() && p.parenDepth == 0 {
+				// After parseSource(), curTok is SOURCE_TABLE, walk tokens for SOURCE name
+				if p.curTok.Type == SOURCE_TABLE {
+					tblName := p.curTok.Literal
+					srcTok := p.curTok
+					var srcName string
+					for i := len(p.tokens) - 1; i >= 0; i-- {
+						if p.tokens[i].Token.Type == SOURCE {
+							srcName = p.tokens[i].Token.Literal
+							break
+						}
+					}
+					p.addSourceRef(SourceKindSource, tblName, srcName, srcTok)
+				}
+			}
 		case REF:
 			p.parseRef()
+			if p.inFromJoinContext() && p.parenDepth == 0 {
+				if p.curTok.Type == REF {
+					p.addSourceRef(SourceKindRef, p.curTok.Literal, "", p.curTok)
+				}
+			}
 		case VAR:
 			p.parseVar()
 		case DB_LBRACE:
@@ -400,8 +449,27 @@ func (p *Parser) parseTokens() {
 		case DB_RBRACE:
 		case JINJA_RBRACE:
 		default:
-			if p.currentClause() == ClauseSelect {
+			if p.inFromJoinContext() && p.parenDepth == 0 && p.curTok.Type == COMMA {
+				p.lastSourceRef = nil
+			} else if p.currentClause() == ClauseSelect {
 				p.collectSelectToken()
+			} else if p.inFromJoinContext() && p.parenDepth == 0 && p.curTok.Type == IDENT {
+				if p.lastSourceRef != nil && p.lastSourceRef.Alias == "" && !p.isSourceAliasKeyword(p.curTok.Type) {
+					// This IDENT is an alias for the last source
+					p.lastSourceRef.Alias = p.curTok.Literal
+				} else {
+					kind := SourceKindTable
+					if _, ok := p.currentScope().CTEs[p.curTok.Literal]; ok {
+						kind = SourceKindCTE
+					}
+					p.addSourceRef(kind, p.curTok.Literal, "", p.curTok)
+				}
+			} else if p.inFromJoinContext() && p.parenDepth == 0 && p.curTok.Type == AS {
+				// Explicit AS alias — next IDENT is the alias
+				if p.lastSourceRef != nil && p.peekTok.Type == IDENT {
+					p.NextToken()
+					p.lastSourceRef.Alias = p.curTok.Literal
+				}
 			}
 		}
 		p.NextToken()
