@@ -17,6 +17,10 @@ type Parser struct {
 	scopeStack  []*QueryScope
 	clauseStack []ClauseKind
 	parenDepth  int
+	// select item accumulator
+	selectTokens   []Token
+	selectHasAS    bool
+	selectStarted  bool
 }
 
 type CTE struct {
@@ -207,6 +211,9 @@ func (p *Parser) currentClause() ClauseKind {
 }
 
 func (p *Parser) setClause(kind ClauseKind) {
+	if p.currentClause() == ClauseSelect {
+		p.finalizeSelectItem()
+	}
 	p.clauseStack[len(p.clauseStack)-1] = kind
 	p.currentScope().ClauseRanges[kind] = p.curTok
 }
@@ -216,6 +223,99 @@ func (p *Parser) CreateQueryScope() *QueryScope {
 		return NewQueryScope(nil)
 	}
 	return p.scopeStack[0]
+}
+
+func (p *Parser) resetSelectAccumulator() {
+	p.selectTokens = p.selectTokens[:0]
+	p.selectHasAS = false
+}
+
+func (p *Parser) finalizeSelectItem() {
+	tokens := p.selectTokens
+	if len(tokens) == 0 {
+		p.resetSelectAccumulator()
+		return
+	}
+
+	item := SelectItem{Token: tokens[0]}
+
+	if p.selectHasAS {
+		// Last token is the alias after AS
+		last := tokens[len(tokens)-1]
+		if last.Type == IDENT {
+			item.Alias = last.Literal
+		}
+	} else if len(tokens) == 1 && tokens[0].Type == IDENT {
+		// Single identifier: both expression and alias
+		item.Alias = tokens[0].Literal
+	} else if len(tokens) == 3 && tokens[0].Type == IDENT && tokens[1].Type == DOT && tokens[2].Type == IDENT {
+		// Qualified column: qualifier.column
+		item.Source = tokens[0].Literal
+		item.Alias = tokens[2].Literal
+	} else if len(tokens) >= 2 {
+		// Implicit alias: last IDENT at depth 0
+		last := tokens[len(tokens)-1]
+		if last.Type == IDENT {
+			// Check it's not preceded by DOT (which would make it a qualified ref)
+			if tokens[len(tokens)-2].Type != DOT {
+				item.Alias = last.Literal
+			}
+		}
+	}
+
+	p.currentScope().SelectItems = append(p.currentScope().SelectItems, item)
+	p.resetSelectAccumulator()
+}
+
+func (p *Parser) collectSelectToken() {
+	if p.parenDepth > 0 {
+		// Inside function call or subquery — don't collect
+		return
+	}
+
+	switch p.curTok.Type {
+	case ASTERISK:
+		// Bare * or qualified table.* — only a star if no prior expression tokens
+		// or the previous token is DOT (table.*)
+		isQualifiedStar := len(p.selectTokens) >= 2 &&
+			p.selectTokens[len(p.selectTokens)-1].Type == DOT &&
+			p.selectTokens[len(p.selectTokens)-2].Type == IDENT
+		isBareStar := len(p.selectTokens) == 0
+
+		if isBareStar || isQualifiedStar {
+			starSource := ""
+			if isQualifiedStar {
+				starSource = p.selectTokens[len(p.selectTokens)-2].Literal
+			}
+			item := SelectItem{
+				IsStar:     true,
+				StarSource: starSource,
+				Token:      p.curTok,
+			}
+			p.currentScope().SelectItems = append(p.currentScope().SelectItems, item)
+			p.resetSelectAccumulator()
+		} else {
+			// Multiplication operator — accumulate as part of expression
+			p.selectTokens = append(p.selectTokens, p.curTok)
+		}
+
+	case COMMA:
+		p.finalizeSelectItem()
+
+	case AS:
+		p.selectHasAS = true
+
+	case DISTINCT:
+		if !p.selectStarted {
+			// Skip DISTINCT right after SELECT
+			return
+		}
+		p.selectTokens = append(p.selectTokens, p.curTok)
+
+	default:
+		p.selectTokens = append(p.selectTokens, p.curTok)
+	}
+	p.selectStarted = true
 }
 
 func (p *Parser) parseTokens() {
@@ -229,6 +329,8 @@ func (p *Parser) parseTokens() {
 		case SELECT:
 			if p.parenDepth == 0 {
 				p.setClause(ClauseSelect)
+				p.selectStarted = false
+				p.resetSelectAccumulator()
 			}
 		case FROM:
 			if p.parenDepth == 0 {
@@ -297,8 +399,16 @@ func (p *Parser) parseTokens() {
 			p.parseJinjaBlock()
 		case DB_RBRACE:
 		case JINJA_RBRACE:
+		default:
+			if p.currentClause() == ClauseSelect {
+				p.collectSelectToken()
+			}
 		}
 		p.NextToken()
+	}
+	// Finalize any pending select item at EOF
+	if p.currentClause() == ClauseSelect {
+		p.finalizeSelectItem()
 	}
 }
 
