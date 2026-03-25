@@ -8,12 +8,15 @@ import (
 )
 
 type Parser struct {
-	l       *Lexer
-	curTok  Token
-	peekTok Token
-	tokens  []TokenLL
-	ctes    CTE
-	setVars map[string]Token
+	l           *Lexer
+	curTok      Token
+	peekTok     Token
+	tokens      []TokenLL
+	ctes        CTE
+	setVars     map[string]Token
+	scopeStack  []*QueryScope
+	clauseStack []ClauseKind
+	parenDepth  int
 }
 
 type CTE struct {
@@ -29,6 +32,7 @@ type TokenLL struct {
 }
 
 func NewParser(input string, dialect docs.Dialect) *Parser {
+	topScope := NewQueryScope(nil)
 	return &Parser{
 		l: New(input, dialect),
 		ctes: CTE{
@@ -36,7 +40,9 @@ func NewParser(input string, dialect docs.Dialect) *Parser {
 			ParenCount: -1,
 			Tokens:     []Token{},
 		},
-		setVars: make(map[string]Token),
+		setVars:     make(map[string]Token),
+		scopeStack:  []*QueryScope{topScope},
+		clauseStack: []ClauseKind{ClauseNone},
 	}
 }
 
@@ -192,14 +198,74 @@ func (p *Parser) decParenCount() {
 	}
 }
 
+func (p *Parser) currentScope() *QueryScope {
+	return p.scopeStack[len(p.scopeStack)-1]
+}
+
+func (p *Parser) currentClause() ClauseKind {
+	return p.clauseStack[len(p.clauseStack)-1]
+}
+
+func (p *Parser) setClause(kind ClauseKind) {
+	p.clauseStack[len(p.clauseStack)-1] = kind
+	p.currentScope().ClauseRanges[kind] = p.curTok
+}
+
+func (p *Parser) CreateQueryScope() *QueryScope {
+	if len(p.scopeStack) == 0 {
+		return NewQueryScope(nil)
+	}
+	return p.scopeStack[0]
+}
+
 func (p *Parser) parseTokens() {
 	for p.curTok.Type != EOF {
 		switch p.curTok.Type {
 		case WITH:
+			if p.parenDepth == 0 {
+				p.setClause(ClauseWith)
+			}
 			p.parseWith()
+		case SELECT:
+			if p.parenDepth == 0 {
+				p.setClause(ClauseSelect)
+			}
+		case FROM:
+			if p.parenDepth == 0 {
+				p.setClause(ClauseFrom)
+			}
+		case JOIN:
+			if p.parenDepth == 0 {
+				p.setClause(ClauseJoin)
+			}
+		case WHERE:
+			if p.parenDepth == 0 {
+				p.setClause(ClauseWhere)
+			}
+		case GROUP:
+			if p.parenDepth == 0 && p.peekTok.Type == BY {
+				p.setClause(ClauseGroupBy)
+			}
+		case ORDER:
+			if p.parenDepth == 0 && p.peekTok.Type == BY {
+				p.setClause(ClauseOrderBy)
+			}
+		case HAVING:
+			if p.parenDepth == 0 {
+				p.setClause(ClauseHaving)
+			}
+		case ON:
+			if p.parenDepth == 0 {
+				p.setClause(ClauseOn)
+			}
 		case LPAREN:
+			p.parenDepth++
 			p.incParenCount()
 		case RPAREN:
+			p.parenDepth--
+			if p.parenDepth < 0 {
+				p.parenDepth = 0
+			}
 			p.decParenCount()
 			if p.ctes.Ind && p.ctes.ParenCount == 0 {
 				p.NextToken()
