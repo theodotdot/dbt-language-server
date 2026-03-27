@@ -108,6 +108,7 @@ func (p *Parser) pushCTEScope(cteName string) {
 	}
 	p.scopeStack = append(p.scopeStack, cteScope)
 	p.clauseStack = append(p.clauseStack, ClauseNone)
+	p.selectStarted = false
 }
 
 func (p *Parser) popCTEScope() {

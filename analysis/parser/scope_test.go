@@ -521,16 +521,17 @@ func TestCTEParsing(t *testing.T) {
 			t.Errorf("expected CTE b columns [id], got %v", cteb.Columns)
 		}
 		// CTE b should reference CTE a
-		if cteb.Scope != nil {
-			found := false
-			for _, src := range cteb.Scope.Sources {
-				if src.Name == "a" && src.Kind == SourceKindCTE {
-					found = true
-				}
+		if cteb.Scope == nil {
+			t.Fatal("expected CTE b to have non-nil Scope")
+		}
+		found := false
+		for _, src := range cteb.Scope.Sources {
+			if src.Name == "a" && src.Kind == SourceKindCTE {
+				found = true
 			}
-			if !found {
-				t.Error("expected CTE b to have SourceRef for CTE a")
-			}
+		}
+		if !found {
+			t.Error("expected CTE b to have SourceRef for CTE a")
 		}
 	})
 

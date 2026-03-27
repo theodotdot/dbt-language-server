@@ -11,6 +11,7 @@ import (
 	"github.com/j-clemons/dbt-language-server/analysis/parser"
 	"github.com/j-clemons/dbt-language-server/docs"
 	"github.com/j-clemons/dbt-language-server/lsp"
+	"github.com/j-clemons/dbt-language-server/lsp/completionKind"
 	"github.com/j-clemons/dbt-language-server/util"
 )
 
@@ -33,6 +34,7 @@ type Document struct {
 	Text      string
 	Tokens    *parser.TokenIndex
 	DefTokens map[string]parser.Token
+	Scope     *parser.QueryScope
 }
 
 type DbtContext struct {
@@ -117,6 +119,7 @@ func (s *State) parseDocument(uri, text string) {
 		Text:      text,
 		Tokens:    parserIns.CreateTokenIndex(),
 		DefTokens: parserIns.CreateTokenNameMap(),
+		Scope:     parserIns.CreateQueryScope(),
 	}
 }
 
@@ -420,6 +423,46 @@ func getModelNameFromURI(uri string) string {
 	return ""
 }
 
+func (s *State) buildModelColumns() parser.ModelColumns {
+	mc := make(parser.ModelColumns, len(s.DbtContext.ModelDetailMap))
+	for name, model := range s.DbtContext.ModelDetailMap {
+		cols := make([]parser.ColumnInfo, len(model.Columns))
+		for i, c := range model.Columns {
+			cols[i] = parser.ColumnInfo{Name: c.Name, Description: c.Description}
+		}
+		mc[name] = cols
+	}
+	return mc
+}
+
+func scopeColumnsToCompletionItems(cols []parser.ScopeColumn) []lsp.CompletionItem {
+	seen := make(map[string]bool)
+	items := make([]lsp.CompletionItem, 0, len(cols))
+	for _, col := range cols {
+		if seen[col.Name] {
+			continue
+		}
+		seen[col.Name] = true
+		items = append(items, lsp.CompletionItem{
+			Label:         col.Name,
+			Detail:        fmt.Sprintf("Column from %s", col.Source),
+			Documentation: col.Description,
+			Kind:          completionKind.Field,
+			InsertText:    col.Name,
+			SortText:      col.Name,
+		})
+	}
+	return items
+}
+
+func (s *State) ResolveColumnsAtPosition(uri, aliasPrefix string) []parser.ScopeColumn {
+	doc, exists := s.Documents[uri]
+	if !exists || doc.Scope == nil {
+		return nil
+	}
+	return parser.ResolveColumnsAtCursor(doc.Scope, s.buildModelColumns(), aliasPrefix)
+}
+
 func getReferencedModels(tokens *parser.TokenIndex) []string {
 	if tokens == nil {
 		return nil
@@ -467,8 +510,13 @@ func (s *State) TextDocumentCompletion(id int, uri string, position lsp.Position
 	} else if jinjaBlockTriggerRegex.MatchString(textBeforeCursor) {
 		items = getMacroCompletionItems(s.DbtContext.MacroDetailMap, s.DbtContext.ProjectYaml)
 	} else {
-		refModels := getReferencedModels(s.Documents[uri].Tokens)
-		items = getColumnCompletionItems(refModels, s.DbtContext.ModelDetailMap)
+		scopeCols := s.ResolveColumnsAtPosition(uri, "")
+		if len(scopeCols) > 0 {
+			items = scopeColumnsToCompletionItems(scopeCols)
+		} else {
+			refModels := getReferencedModels(s.Documents[uri].Tokens)
+			items = getColumnCompletionItems(refModels, s.DbtContext.ModelDetailMap)
+		}
 		items = append(items, s.DbtContext.Dialect.FunctionCompletionItems()...)
 	}
 

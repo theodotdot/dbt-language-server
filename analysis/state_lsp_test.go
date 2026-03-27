@@ -544,3 +544,80 @@ func TestTextDocumentCompletion(t *testing.T) {
 		})
 	}
 }
+
+func TestDocumentScopePopulated(t *testing.T) {
+	state := newTestState()
+	uri := "test://scope.sql"
+
+	tests := []struct {
+		name       string
+		sql        string
+		minSources int
+	}{
+		{"ref produces source", "select id from {{ ref('customers') }}", 1},
+		{"plain SQL", "select 1", 0},
+		{"empty string", "", 0},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			state.parseDocument(uri, tc.sql)
+			doc := state.Documents[uri]
+			if doc.Scope == nil {
+				t.Fatal("expected non-nil Scope")
+			}
+			if len(doc.Scope.Sources) < tc.minSources {
+				t.Errorf("expected at least %d sources, got %d", tc.minSources, len(doc.Scope.Sources))
+			}
+		})
+	}
+}
+
+func TestResolveColumnsAtPosition(t *testing.T) {
+	state := newTestState()
+	uri := "test://resolve.sql"
+
+	state.parseDocument(uri, "select  from {{ ref('customers') }}")
+	cols := state.ResolveColumnsAtPosition(uri, "")
+	if len(cols) != 2 {
+		t.Fatalf("expected 2 columns, got %d", len(cols))
+	}
+
+	names := map[string]bool{}
+	for _, c := range cols {
+		names[c.Name] = true
+	}
+	if !names["customer_id"] || !names["first_name"] {
+		t.Errorf("expected customer_id and first_name, got %v", cols)
+	}
+}
+
+func TestResolveColumnsAtPositionCTE(t *testing.T) {
+	state := newTestState()
+	uri := "test://cte.sql"
+
+	state.parseDocument(uri, "with cte as (select customer_id from {{ ref('customers') }}) select  from cte")
+	cols := state.ResolveColumnsAtPosition(uri, "")
+	if len(cols) != 1 {
+		t.Fatalf("expected 1 CTE column, got %d: %+v", len(cols), cols)
+	}
+	if cols[0].Name != "customer_id" {
+		t.Errorf("expected 'customer_id', got %q", cols[0].Name)
+	}
+}
+
+func TestResolveColumnsAtPositionAliasFiltered(t *testing.T) {
+	state := newTestState()
+	uri := "test://alias.sql"
+
+	state.parseDocument(uri, "select c. from {{ ref('customers') }} c")
+	cols := state.ResolveColumnsAtPosition(uri, "c")
+	if len(cols) != 2 {
+		t.Fatalf("expected 2 columns for alias 'c', got %d", len(cols))
+	}
+	for _, c := range cols {
+		if c.Source != "c" {
+			t.Errorf("expected source 'c', got %q", c.Source)
+		}
+	}
+}
