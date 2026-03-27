@@ -2,12 +2,15 @@ package analysis
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/j-clemons/dbt-language-server/analysis/parser"
 	"github.com/j-clemons/dbt-language-server/docs"
 	"github.com/j-clemons/dbt-language-server/lsp"
 	"github.com/j-clemons/dbt-language-server/lsp/completionKind"
+	"github.com/j-clemons/dbt-language-server/testutils"
 )
 
 func newTestState() *State {
@@ -620,4 +623,100 @@ func TestResolveColumnsAtPositionAliasFiltered(t *testing.T) {
 			t.Errorf("expected source 'c', got %q", c.Source)
 		}
 	}
+}
+
+func integrationTestState(t *testing.T) (*State, string) {
+	t.Helper()
+	testdataRoot, err := testutils.GetTestdataPath("jaffle_shop_duckdb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := NewState()
+	state.refreshDbtContext(testdataRoot)
+	return &state, testdataRoot
+}
+
+func TestResolveColumnsIntegration(t *testing.T) {
+	state, _ := integrationTestState(t)
+	uri := "test://integration.sql"
+
+	t.Run("simple ref columns", func(t *testing.T) {
+		state.parseDocument(uri, "select  from {{ ref('customers') }}")
+		cols := state.ResolveColumnsAtPosition(uri, "")
+		if len(cols) < 3 {
+			t.Fatalf("expected >= 3 columns from customers, got %d", len(cols))
+		}
+		names := map[string]bool{}
+		for _, c := range cols {
+			names[c.Name] = true
+		}
+		for _, expected := range []string{"customer_id", "first_name", "last_name"} {
+			if !names[expected] {
+				t.Errorf("missing expected column %q", expected)
+			}
+		}
+	})
+
+	t.Run("multi-CTE query", func(t *testing.T) {
+		sql := `with order_totals as (
+    select customer_id, count(order_id) as order_count
+    from {{ ref('stg_orders') }}
+    group by customer_id
+), customer_info as (
+    select customer_id, first_name
+    from {{ ref('stg_customers') }}
+)
+select ci.customer_id, ci.first_name, ot.order_count
+from customer_info ci
+join order_totals ot on ci.customer_id = ot.customer_id`
+		state.parseDocument(uri, sql)
+		cols := state.ResolveColumnsAtPosition(uri, "ci")
+		if len(cols) != 2 {
+			t.Fatalf("expected 2 columns for alias 'ci', got %d: %+v", len(cols), cols)
+		}
+	})
+
+	t.Run("alias filtering in JOIN", func(t *testing.T) {
+		sql := `select o.order_id, c.first_name
+from {{ ref('orders') }} o
+join {{ ref('customers') }} c on o.customer_id = c.customer_id`
+		state.parseDocument(uri, sql)
+		oCols := state.ResolveColumnsAtPosition(uri, "o")
+		if len(oCols) == 0 {
+			t.Fatal("expected columns for alias 'o'")
+		}
+		for _, c := range oCols {
+			if c.Source != "o" {
+				t.Errorf("expected source 'o', got %q", c.Source)
+			}
+		}
+	})
+
+	t.Run("jinja if/else produces multiple sources", func(t *testing.T) {
+		sql := "select order_id from\n{% if true %}\n  {{ ref('orders') }}\n{% else %}\n  {{ ref('stg_orders') }}\n{% endif %}"
+		state.parseDocument(uri, sql)
+		scope := state.Documents[uri].Scope
+		if scope == nil {
+			t.Fatal("expected non-nil scope")
+		}
+		if len(scope.Sources) < 2 {
+			t.Errorf("expected >= 2 sources from jinja if/else, got %d", len(scope.Sources))
+		}
+	})
+
+	t.Run("testdata file parse", func(t *testing.T) {
+		testdataRoot, _ := testutils.GetTestdataPath("jaffle_shop_duckdb")
+		content, err := os.ReadFile(filepath.Join(testdataRoot, "models/order_details.sql"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		state.parseDocument(uri, string(content))
+		scope := state.Documents[uri].Scope
+		if scope == nil {
+			t.Fatal("expected non-nil scope")
+		}
+		if len(scope.Sources) < 3 {
+			t.Errorf("expected >= 3 sources in order_details, got %d", len(scope.Sources))
+		}
+	})
 }

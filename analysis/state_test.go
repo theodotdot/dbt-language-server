@@ -104,6 +104,21 @@ func expectedTestState() State {
 			},
 			Dialect: docs.Dialect("duckdb"),
 			ModelDetailMap: map[string]ModelDetails{
+				"chained_ctes": {
+					URI:         filepath.Join(testdataRoot, "models/chained_ctes.sql"),
+					ProjectName: "jaffle_shop",
+					SchemaRange: lsp.Range{},
+				},
+				"conditional_source": {
+					URI:         filepath.Join(testdataRoot, "models/conditional_source.sql"),
+					ProjectName: "jaffle_shop",
+					SchemaRange: lsp.Range{},
+				},
+				"customer_orders_summary": {
+					URI:         filepath.Join(testdataRoot, "models/customer_orders_summary.sql"),
+					ProjectName: "jaffle_shop",
+					SchemaRange: lsp.Range{},
+				},
 				"customers": {
 					URI:         filepath.Join(testdataRoot, "models/customers.sql"),
 					ProjectName: "jaffle_shop",
@@ -122,6 +137,11 @@ func expectedTestState() State {
 						{Name: "number_of_orders", Description: "Count of the number of orders a customer has placed"},
 						{Name: "total_order_amount", Description: "Total value (AUD) of a customer's orders"},
 					},
+				},
+				"order_details": {
+					URI:         filepath.Join(testdataRoot, "models/order_details.sql"),
+					ProjectName: "jaffle_shop",
+					SchemaRange: lsp.Range{},
 				},
 				"orders": {
 					URI:         filepath.Join(testdataRoot, "models/orders.sql"),
