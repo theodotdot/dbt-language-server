@@ -475,3 +475,143 @@ func TestParseFromSources(t *testing.T) {
 		})
 	}
 }
+
+func TestCTEParsing(t *testing.T) {
+	t.Run("single CTE", func(t *testing.T) {
+		input := "with cte as (select id, name from {{ ref('orders') }}) select * from cte"
+		p := Parse(input, docs.Dialect("snowflake"))
+		scope := p.CreateQueryScope()
+
+		cteDef, ok := scope.CTEs["cte"]
+		if !ok {
+			t.Fatal("expected CTE 'cte' in scope")
+		}
+		if len(cteDef.Columns) != 2 {
+			t.Fatalf("expected 2 columns, got %d: %v", len(cteDef.Columns), cteDef.Columns)
+		}
+		if cteDef.Columns[0] != "id" || cteDef.Columns[1] != "name" {
+			t.Errorf("expected columns [id, name], got %v", cteDef.Columns)
+		}
+
+		// Main scope should have CTE source ref
+		found := false
+		for _, src := range scope.Sources {
+			if src.Name == "cte" && src.Kind == SourceKindCTE {
+				found = true
+			}
+		}
+		if !found {
+			t.Error("expected SourceRef with Kind=SourceKindCTE for 'cte'")
+		}
+	})
+
+	t.Run("chained CTEs", func(t *testing.T) {
+		input := "with a as (select id from {{ ref('orders') }}), b as (select id from a) select * from b"
+		p := Parse(input, docs.Dialect("snowflake"))
+		scope := p.CreateQueryScope()
+
+		if _, ok := scope.CTEs["a"]; !ok {
+			t.Fatal("expected CTE 'a'")
+		}
+		cteb, ok := scope.CTEs["b"]
+		if !ok {
+			t.Fatal("expected CTE 'b'")
+		}
+		if len(cteb.Columns) != 1 || cteb.Columns[0] != "id" {
+			t.Errorf("expected CTE b columns [id], got %v", cteb.Columns)
+		}
+		// CTE b should reference CTE a
+		if cteb.Scope != nil {
+			found := false
+			for _, src := range cteb.Scope.Sources {
+				if src.Name == "a" && src.Kind == SourceKindCTE {
+					found = true
+				}
+			}
+			if !found {
+				t.Error("expected CTE b to have SourceRef for CTE a")
+			}
+		}
+	})
+
+	t.Run("CTE with select star", func(t *testing.T) {
+		input := "with cte as (select * from {{ ref('orders') }}) select * from cte"
+		p := Parse(input, docs.Dialect("snowflake"))
+		scope := p.CreateQueryScope()
+
+		cteDef, ok := scope.CTEs["cte"]
+		if !ok {
+			t.Fatal("expected CTE 'cte'")
+		}
+		if len(cteDef.Columns) != 1 || cteDef.Columns[0] != "*" {
+			t.Errorf("expected columns [*], got %v", cteDef.Columns)
+		}
+	})
+
+	t.Run("CTE with aliased columns", func(t *testing.T) {
+		input := "with cte as (select id as order_id, name as customer_name from {{ ref('orders') }}) select * from cte"
+		p := Parse(input, docs.Dialect("snowflake"))
+		scope := p.CreateQueryScope()
+
+		cteDef, ok := scope.CTEs["cte"]
+		if !ok {
+			t.Fatal("expected CTE 'cte'")
+		}
+		if len(cteDef.Columns) != 2 {
+			t.Fatalf("expected 2 columns, got %d: %v", len(cteDef.Columns), cteDef.Columns)
+		}
+		if cteDef.Columns[0] != "order_id" || cteDef.Columns[1] != "customer_name" {
+			t.Errorf("expected [order_id, customer_name], got %v", cteDef.Columns)
+		}
+	})
+
+	t.Run("backward compat - old CTE struct", func(t *testing.T) {
+		input := "with cte1 as (select id from {{ ref('orders') }}), cte2 as (select id from cte1) select * from cte2"
+		p := Parse(input, docs.Dialect("snowflake"))
+		tokenMap := p.CreateTokenNameMap()
+
+		if _, ok := tokenMap["cte1"]; !ok {
+			t.Error("expected cte1 in CreateTokenNameMap")
+		}
+		if _, ok := tokenMap["cte2"]; !ok {
+			t.Error("expected cte2 in CreateTokenNameMap")
+		}
+	})
+
+	t.Run("CTE body does not corrupt main scope", func(t *testing.T) {
+		input := "with cte as (select id from t) select name from {{ ref('orders') }}"
+		p := Parse(input, docs.Dialect("snowflake"))
+		scope := p.CreateQueryScope()
+
+		// Main scope should have SelectItems from the outer SELECT
+		if len(scope.SelectItems) != 1 {
+			t.Fatalf("expected 1 SelectItem in main scope, got %d", len(scope.SelectItems))
+		}
+		if scope.SelectItems[0].Alias != "name" {
+			t.Errorf("expected main scope SelectItem alias 'name', got %q", scope.SelectItems[0].Alias)
+		}
+	})
+}
+
+func TestCTEErrorRecovery(t *testing.T) {
+	t.Run("missing closing paren", func(t *testing.T) {
+		input := "with cte as (select id from t"
+		p := Parse(input, docs.Dialect("snowflake"))
+		scope := p.CreateQueryScope()
+		if scope == nil {
+			t.Fatal("expected non-nil scope")
+		}
+	})
+
+	t.Run("jinja only input", func(t *testing.T) {
+		input := "{{ ref('orders') }}"
+		p := Parse(input, docs.Dialect("snowflake"))
+		scope := p.CreateQueryScope()
+		if scope == nil {
+			t.Fatal("expected non-nil scope")
+		}
+		if len(scope.CTEs) != 0 {
+			t.Errorf("expected no CTEs, got %d", len(scope.CTEs))
+		}
+	})
+}

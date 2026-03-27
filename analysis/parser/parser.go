@@ -78,15 +78,58 @@ func (p *Parser) NextToken() Token {
 func (p *Parser) parseWith() {
 	p.NextToken()
 	if p.curTok.Type == IDENT {
+		cteName := p.curTok.Literal
+		cteToken := p.curTok
 		p.ctes.Ind = true
 		p.ctes.Tokens = append(p.ctes.Tokens, p.curTok)
+		p.registerCTE(cteName, cteToken)
 		if p.peekTok.Type == AS {
 			p.NextToken()
 		}
 		if p.peekTok.Type == LPAREN {
 			p.ctes.ParenCount = 1
+			p.pushCTEScope(cteName)
 		}
 		p.NextToken()
+	}
+}
+
+func (p *Parser) registerCTE(name string, tok Token) {
+	topScope := p.scopeStack[0]
+	if _, exists := topScope.CTEs[name]; !exists {
+		topScope.CTEs[name] = &CTEDef{Name: name, Token: tok}
+	}
+}
+
+func (p *Parser) pushCTEScope(cteName string) {
+	cteScope := NewQueryScope(p.scopeStack[0])
+	if cteDef, ok := p.scopeStack[0].CTEs[cteName]; ok {
+		cteDef.Scope = cteScope
+	}
+	p.scopeStack = append(p.scopeStack, cteScope)
+	p.clauseStack = append(p.clauseStack, ClauseNone)
+}
+
+func (p *Parser) popCTEScope() {
+	if len(p.scopeStack) <= 1 {
+		return
+	}
+	cteScope := p.scopeStack[len(p.scopeStack)-1]
+	p.scopeStack = p.scopeStack[:len(p.scopeStack)-1]
+	p.clauseStack = p.clauseStack[:len(p.clauseStack)-1]
+
+	// Extract columns from CTE's SelectItems
+	for _, cteDef := range p.scopeStack[0].CTEs {
+		if cteDef.Scope == cteScope {
+			for _, item := range cteScope.SelectItems {
+				if item.IsStar {
+					cteDef.Columns = append(cteDef.Columns, "*")
+				} else if item.Alias != "" {
+					cteDef.Columns = append(cteDef.Columns, item.Alias)
+				}
+			}
+			break
+		}
 	}
 }
 
@@ -399,14 +442,33 @@ func (p *Parser) parseTokens() {
 			}
 			p.decParenCount()
 			if p.ctes.Ind && p.ctes.ParenCount == 0 {
+				// Finalize any pending select item in the CTE scope
+				if p.currentClause() == ClauseSelect {
+					p.finalizeSelectItem()
+				}
+				// Pop CTE scope and extract columns
+				p.popCTEScope()
+
 				p.NextToken()
 				if p.curTok.Type == COMMA {
 					p.NextToken()
 					if p.curTok.Type == IDENT {
+						cteName := p.curTok.Literal
+						cteToken := p.curTok
 						p.ctes.Tokens = append(p.ctes.Tokens, p.curTok)
+						p.registerCTE(cteName, cteToken)
+						if p.peekTok.Type == AS {
+							p.NextToken()
+						}
+						if p.peekTok.Type == LPAREN {
+							p.ctes.ParenCount = 1
+							p.pushCTEScope(cteName)
+						}
+						p.NextToken()
 					}
 				} else {
 					p.ctes.Ind = false
+					continue // re-process curTok in main switch
 				}
 			}
 		case SOURCE:
@@ -459,7 +521,7 @@ func (p *Parser) parseTokens() {
 					p.lastSourceRef.Alias = p.curTok.Literal
 				} else {
 					kind := SourceKindTable
-					if _, ok := p.currentScope().CTEs[p.curTok.Literal]; ok {
+					if _, ok := p.scopeStack[0].CTEs[p.curTok.Literal]; ok {
 						kind = SourceKindCTE
 					}
 					p.addSourceRef(kind, p.curTok.Literal, "", p.curTok)
