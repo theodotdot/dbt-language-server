@@ -1,11 +1,13 @@
 package analysis
 
 import (
+	"os"
 	"regexp"
 	"strings"
 
 	"github.com/j-clemons/dbt-language-server/analysis/parser"
 	"github.com/j-clemons/dbt-language-server/lsp"
+	"github.com/j-clemons/dbt-language-server/util"
 )
 
 var dbtIdentifierRegex = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
@@ -80,6 +82,65 @@ func (s *State) PrepareRename(id int, uri string, position lsp.Position) lsp.Pre
 	}
 
 	return resp
+}
+
+// findModelRefs scans all SQL files in the project's model paths and returns
+// TextDocumentEdit entries for every same-project ref('oldName') found.
+func (s *State) findModelRefs(oldName, newName string) []lsp.TextDocumentEdit {
+	editsMap := map[string][]lsp.TextEdit{}
+
+	for _, modelPath := range s.DbtContext.ProjectYaml.ModelPaths.Value {
+		fullPath := s.DbtContext.ProjectRoot + "/" + modelPath
+		if _, err := os.Stat(fullPath); err != nil {
+			continue
+		}
+		files, err := util.WalkFilepath(fullPath, ".sql")
+		if err != nil {
+			continue
+		}
+		for _, filePath := range files {
+			uri := "file://" + filePath
+			var tokens *parser.TokenIndex
+
+			if doc, ok := s.Documents[uri]; ok && doc.Tokens != nil {
+				tokens = doc.Tokens
+			} else {
+				text, err := util.ReadFileContents(filePath)
+				if err != nil {
+					continue
+				}
+				p := parser.Parse(text, s.DbtContext.Dialect)
+				tokens = p.CreateTokenIndex()
+			}
+
+			for _, lineTokens := range tokens.LineTokens() {
+				for _, tll := range lineTokens {
+					if tll.Token.Type != parser.REF || tll.Token.Literal != oldName {
+						continue
+					}
+					if found, _ := tll.TokenLookbackMatch(parser.PACKAGE, 2); found {
+						continue
+					}
+					editsMap[uri] = append(editsMap[uri], lsp.TextEdit{
+						Range: lsp.Range{
+							Start: lsp.Position{Line: tll.Token.Line, Character: tll.Token.Column},
+							End:   lsp.Position{Line: tll.Token.Line, Character: tll.Token.Column + len(oldName)},
+						},
+						NewText: newName,
+					})
+				}
+			}
+		}
+	}
+
+	result := make([]lsp.TextDocumentEdit, 0, len(editsMap))
+	for uri, edits := range editsMap {
+		result = append(result, lsp.TextDocumentEdit{
+			TextDocument: lsp.OptionalVersionedTextDocumentIdentifier{URI: uri},
+			Edits:        edits,
+		})
+	}
+	return result
 }
 
 // Rename builds a WorkspaceEdit for renaming a symbol.
