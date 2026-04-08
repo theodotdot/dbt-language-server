@@ -262,8 +262,13 @@ func expectedTestState() State {
 							Table:       "jaffle_shop",
 							URI:         filepath.Join(testdataRoot, "models/schema.yml"),
 							Range: lsp.Range{
-								Start: lsp.Position{Line: 89, Character: 14},
-								End:   lsp.Position{Line: 89, Character: 14},
+								Start: lsp.Position{Line: 96, Character: 14},
+								End:   lsp.Position{Line: 96, Character: 14},
+							},
+							Columns: []Column{
+								{Name: "customer_id", Description: ""},
+								{Name: "first_name", Description: ""},
+								{Name: "last_name", Description: ""},
 							},
 						},
 						"orders": {
@@ -275,6 +280,11 @@ func expectedTestState() State {
 								Start: lsp.Position{Line: 88, Character: 14},
 								End:   lsp.Position{Line: 88, Character: 14},
 							},
+							Columns: []Column{
+								{Name: "order_id", Description: ""},
+								{Name: "customer_id", Description: ""},
+								{Name: "order_date", Description: ""},
+							},
 						},
 					},
 				},
@@ -283,8 +293,8 @@ func expectedTestState() State {
 					Description: "",
 					URI:         filepath.Join(testdataRoot, "models/schema.yml"),
 					Range: lsp.Range{
-						Start: lsp.Position{Line: 91, Character: 10},
-						End:   lsp.Position{Line: 91, Character: 10},
+						Start: lsp.Position{Line: 105, Character: 10},
+						End:   lsp.Position{Line: 105, Character: 10},
 					},
 					Tables: map[string]SourceTable{
 						"payments": {
@@ -293,8 +303,13 @@ func expectedTestState() State {
 							Table:       "stripe",
 							URI:         filepath.Join(testdataRoot, "models/schema.yml"),
 							Range: lsp.Range{
-								Start: lsp.Position{Line: 93, Character: 14},
-								End:   lsp.Position{Line: 93, Character: 14},
+								Start: lsp.Position{Line: 107, Character: 14},
+								End:   lsp.Position{Line: 107, Character: 14},
+							},
+							Columns: []Column{
+								{Name: "payment_id", Description: "Unique payment identifier"},
+								{Name: "payment_method", Description: ""},
+								{Name: "amount", Description: ""},
 							},
 						},
 					},

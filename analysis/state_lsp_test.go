@@ -49,6 +49,10 @@ func newTestState() *State {
 						Start: lsp.Position{Line: 12, Character: 0},
 						End:   lsp.Position{Line: 12, Character: 0},
 					},
+					Columns: []Column{
+						{Name: "id", Description: "Primary key"},
+						{Name: "name", Description: "Name field"},
+					},
 				},
 			},
 		},

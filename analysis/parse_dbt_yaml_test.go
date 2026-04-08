@@ -2,6 +2,7 @@ package analysis
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -87,20 +88,29 @@ func TestParsePropertiesYamlFile(t *testing.T) {
 							Value:    "orders",
 							Position: lsp.Position{Line: 88, Character: 14},
 						},
-
 						Description: AnnotatedField[string]{
 							Value:    "",
 							Position: lsp.Position{Line: 0, Character: 0},
+						},
+						Columns: []ColumnProperties{
+							{Name: AnnotatedField[string]{Value: "order_id", Position: lsp.Position{Line: 90, Character: 18}}, Description: AnnotatedField[string]{Value: "", Position: lsp.Position{Line: 91, Character: 25}}},
+							{Name: AnnotatedField[string]{Value: "customer_id", Position: lsp.Position{Line: 92, Character: 18}}, Description: AnnotatedField[string]{Value: "", Position: lsp.Position{Line: 93, Character: 25}}},
+							{Name: AnnotatedField[string]{Value: "order_date", Position: lsp.Position{Line: 94, Character: 18}}, Description: AnnotatedField[string]{Value: "", Position: lsp.Position{Line: 95, Character: 25}}},
 						},
 					},
 					{
 						Name: AnnotatedField[string]{
 							Value:    "customers",
-							Position: lsp.Position{Line: 89, Character: 14},
+							Position: lsp.Position{Line: 96, Character: 14},
 						},
 						Description: AnnotatedField[string]{
 							Value:    "",
 							Position: lsp.Position{Line: 0, Character: 0},
+						},
+						Columns: []ColumnProperties{
+							{Name: AnnotatedField[string]{Value: "customer_id", Position: lsp.Position{Line: 98, Character: 18}}, Description: AnnotatedField[string]{Value: "", Position: lsp.Position{Line: 99, Character: 25}}},
+							{Name: AnnotatedField[string]{Value: "first_name", Position: lsp.Position{Line: 100, Character: 18}}, Description: AnnotatedField[string]{Value: "", Position: lsp.Position{Line: 101, Character: 25}}},
+							{Name: AnnotatedField[string]{Value: "last_name", Position: lsp.Position{Line: 102, Character: 18}}, Description: AnnotatedField[string]{Value: "", Position: lsp.Position{Line: 103, Character: 25}}},
 						},
 					},
 				},
@@ -108,7 +118,7 @@ func TestParsePropertiesYamlFile(t *testing.T) {
 			{
 				Name: AnnotatedField[string]{
 					Value:    "stripe",
-					Position: lsp.Position{Line: 91, Character: 10},
+					Position: lsp.Position{Line: 105, Character: 10},
 				},
 				Database: AnnotatedField[string]{
 					Value:    "",
@@ -126,11 +136,16 @@ func TestParsePropertiesYamlFile(t *testing.T) {
 					{
 						Name: AnnotatedField[string]{
 							Value:    "payments",
-							Position: lsp.Position{Line: 93, Character: 14},
+							Position: lsp.Position{Line: 107, Character: 14},
 						},
 						Description: AnnotatedField[string]{
 							Value:    "",
 							Position: lsp.Position{Line: 0, Character: 0},
+						},
+						Columns: []ColumnProperties{
+							{Name: AnnotatedField[string]{Value: "payment_id", Position: lsp.Position{Line: 109, Character: 18}}, Description: AnnotatedField[string]{Value: "Unique payment identifier", Position: lsp.Position{Line: 110, Character: 25}}},
+							{Name: AnnotatedField[string]{Value: "payment_method", Position: lsp.Position{Line: 111, Character: 18}}, Description: AnnotatedField[string]{Value: "", Position: lsp.Position{Line: 112, Character: 25}}},
+							{Name: AnnotatedField[string]{Value: "amount", Position: lsp.Position{Line: 113, Character: 18}}, Description: AnnotatedField[string]{Value: "", Position: lsp.Position{Line: 114, Character: 25}}},
 						},
 					},
 				},
@@ -141,4 +156,56 @@ func TestParsePropertiesYamlFile(t *testing.T) {
 	if fmt.Sprintf("%#v", actualProperties) != fmt.Sprintf("%#v", expectedProperties) {
 		t.Errorf("expected %#v but got %#v", expectedProperties, actualProperties)
 	}
+}
+
+func TestSourceTableColumnsParsing(t *testing.T) {
+	t.Run("source with columns", func(t *testing.T) {
+		yml := `
+sources:
+  - name: my_src
+    tables:
+      - name: my_tbl
+        columns:
+          - name: col_a
+            description: "First column"
+          - name: col_b
+            description: ""
+`
+		tmpFile := filepath.Join(t.TempDir(), "test.yml")
+		if err := os.WriteFile(tmpFile, []byte(yml), 0644); err != nil {
+			t.Fatal(err)
+		}
+		props := parsePropertiesYamlFile(tmpFile)
+		if len(props.Sources) != 1 {
+			t.Fatalf("expected 1 source, got %d", len(props.Sources))
+		}
+		cols := props.Sources[0].Tables[0].Columns
+		if len(cols) != 2 {
+			t.Fatalf("expected 2 columns, got %d", len(cols))
+		}
+		if cols[0].Name.Value != "col_a" || cols[0].Description.Value != "First column" {
+			t.Errorf("col_a: got name=%q desc=%q", cols[0].Name.Value, cols[0].Description.Value)
+		}
+		if cols[1].Name.Value != "col_b" || cols[1].Description.Value != "" {
+			t.Errorf("col_b: got name=%q desc=%q", cols[1].Name.Value, cols[1].Description.Value)
+		}
+	})
+
+	t.Run("source without columns", func(t *testing.T) {
+		yml := `
+sources:
+  - name: my_src
+    tables:
+      - name: bare_tbl
+`
+		tmpFile := filepath.Join(t.TempDir(), "test.yml")
+		if err := os.WriteFile(tmpFile, []byte(yml), 0644); err != nil {
+			t.Fatal(err)
+		}
+		props := parsePropertiesYamlFile(tmpFile)
+		cols := props.Sources[0].Tables[0].Columns
+		if cols != nil {
+			t.Errorf("expected nil columns for bare table, got %v", cols)
+		}
+	})
 }

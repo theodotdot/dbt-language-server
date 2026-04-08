@@ -87,8 +87,29 @@ sources:
     schema: jaffle_shop
     tables:
       - name: orders
+        columns:
+          - name: order_id
+            description: ""
+          - name: customer_id
+            description: ""
+          - name: order_date
+            description: ""
       - name: customers
+        columns:
+          - name: customer_id
+            description: ""
+          - name: first_name
+            description: ""
+          - name: last_name
+            description: ""
 
   - name: stripe
     tables:
       - name: payments
+        columns:
+          - name: payment_id
+            description: "Unique payment identifier"
+          - name: payment_method
+            description: ""
+          - name: amount
+            description: ""

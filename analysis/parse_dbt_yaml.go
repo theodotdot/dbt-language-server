@@ -168,6 +168,7 @@ type SourceProperties struct {
 type SourceTableProperties struct {
 	Name        AnnotatedField[string] `yaml:"name"`
 	Description AnnotatedField[string] `yaml:"description"`
+	Columns     []ColumnProperties     `yaml:"columns"`
 }
 
 func parsePropertiesYamlFile(path string) PropertiesYaml {
@@ -202,6 +203,7 @@ type SourceTable struct {
 	Table       string
 	URI         string
 	Range       lsp.Range
+	Columns     []Column
 }
 
 func parseYamlModels(projectRoot string, projYaml DbtProjectYaml) (map[string]ModelProperties, map[string]Source) {
@@ -254,6 +256,13 @@ func parseYamlModels(projectRoot string, projYaml DbtProjectYaml) (map[string]Mo
 				}
 
 				for _, table := range source.Tables {
+					var columns []Column
+					for _, col := range table.Columns {
+						columns = append(columns, Column{
+							Name:        col.Name.Value,
+							Description: col.Description.Value,
+						})
+					}
 					sourceMap[source.Name.Value].Tables[table.Name.Value] = SourceTable{
 						Name:        table.Name.Value,
 						Description: jinja.ReplaceDocBlocks(table.Description.Value, docsMap),
@@ -263,6 +272,7 @@ func parseYamlModels(projectRoot string, projYaml DbtProjectYaml) (map[string]Mo
 							Start: table.Name.Position,
 							End:   table.Name.Position,
 						},
+						Columns: columns,
 					}
 				}
 			}
