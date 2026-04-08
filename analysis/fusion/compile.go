@@ -43,21 +43,6 @@ type Info struct {
 	Ts           string
 }
 
-func publishDiagnostics(writer io.Writer, uri string, diagnostics []lsp.Diagnostic) {
-	notification := lsp.DiagnosticsNotification{
-		Notification: lsp.Notification{
-			RPC:    "2.0",
-			Method: "textDocument/publishDiagnostics",
-		},
-		Params: lsp.PublishDiagnosticsParams{
-			URI:         uri,
-			Diagnostics: diagnostics,
-		},
-	}
-
-	util.WriteResponse(writer, notification)
-}
-
 func FusionCompile(s *analysis.State, uri string, logger *log.Logger, writer io.Writer) {
 	if !s.IsFusionEnabled() {
 		return
@@ -105,7 +90,7 @@ func FusionCompile(s *analysis.State, uri string, logger *log.Logger, writer io.
 	go func() {
 		for diagnostic := range diagnosticsChan {
 			diagnostics = append(diagnostics, diagnostic)
-			publishDiagnostics(writer, uri, diagnostics)
+			util.PublishDiagnostics(writer, uri, diagnostics)
 		}
 	}()
 
@@ -130,7 +115,7 @@ func FusionCompile(s *analysis.State, uri string, logger *log.Logger, writer io.
 		logger.Printf("Command failed: %v", err)
 	}
 
-	publishDiagnostics(writer, uri, diagnostics)
+	util.PublishDiagnostics(writer, uri, diagnostics)
 }
 
 func processStream(stream io.Reader, uri string, logger *log.Logger, diagnosticsChan chan lsp.Diagnostic, streamName string) {
