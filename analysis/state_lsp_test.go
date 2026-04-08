@@ -614,6 +614,63 @@ func TestScopeColumnCompletion(t *testing.T) {
 	})
 }
 
+func TestMacroArgCompletion(t *testing.T) {
+	state := newTestState()
+	uri := "test://macroarg.sql"
+
+	t.Run("cursor inside macro call", func(t *testing.T) {
+		state.parseDocument(uri, "select {{ my_macro() }}")
+		resp := state.TextDocumentCompletion(1, uri, lsp.Position{Line: 0, Character: 19})
+		found := false
+		for _, item := range resp.Result {
+			if item.Label == "arg1" && item.Kind == completionKind.Variable {
+				found = true
+			}
+		}
+		if !found {
+			t.Error("expected macro arg 'arg1' completion")
+		}
+	})
+
+	t.Run("nested call still resolves outer macro", func(t *testing.T) {
+		state.parseDocument(uri, "select {{ my_macro(func(x), ) }}")
+		resp := state.TextDocumentCompletion(1, uri, lsp.Position{Line: 0, Character: 28})
+		found := false
+		for _, item := range resp.Result {
+			if item.Label == "arg1" && item.Kind == completionKind.Variable {
+				found = true
+			}
+		}
+		if !found {
+			t.Error("expected macro arg completion inside nested call")
+		}
+	})
+
+	t.Run("cursor outside parens no macro args", func(t *testing.T) {
+		state.parseDocument(uri, "select {{ my_macro() }} ")
+		resp := state.TextDocumentCompletion(1, uri, lsp.Position{Line: 0, Character: 24})
+		for _, item := range resp.Result {
+			if item.Kind == completionKind.Variable {
+				t.Errorf("should not return macro args outside parens, got %q", item.Label)
+			}
+		}
+	})
+
+	t.Run("packaged macro args", func(t *testing.T) {
+		state.parseDocument(uri, "select {{ other_pkg.ext_macro() }}")
+		resp := state.TextDocumentCompletion(1, uri, lsp.Position{Line: 0, Character: 30})
+		labels := map[string]bool{}
+		for _, item := range resp.Result {
+			if item.Kind == completionKind.Variable {
+				labels[item.Label] = true
+			}
+		}
+		if !labels["x"] || !labels["y"] {
+			t.Errorf("expected args x and y from ext_macro, got %v", labels)
+		}
+	})
+}
+
 func TestDotQualifiedCompletion(t *testing.T) {
 	state := newTestState()
 	// Add orders model for alias tests

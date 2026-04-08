@@ -21,6 +21,8 @@ var (
 	varTriggerRegex        = regexp.MustCompile(`\bvar\(('|")[a-zA-Z]*$`)
 	jinjaBlockTriggerRegex = regexp.MustCompile(`\{\{\s*`)
 	dotTriggerRegex        = regexp.MustCompile(`\b([a-zA-Z_][a-zA-Z0-9_]*)\.$`)
+	macroNameRegex         = regexp.MustCompile(`[a-zA-Z_][a-zA-Z0-9_]*$`)
+	kwargRegex             = regexp.MustCompile(`\b([a-zA-Z_][a-zA-Z0-9_]*)\s*=`)
 )
 
 type State struct {
@@ -498,6 +500,62 @@ func getReferencedModels(tokens *parser.TokenIndex) []string {
 	return models
 }
 
+func detectMacroCallContext(textBeforeCursor string) (macroName string, argsText string, ok bool) {
+	if !isInsideJinjaBlock(textBeforeCursor) {
+		return "", "", false
+	}
+	depth := 0
+	for i := len(textBeforeCursor) - 1; i >= 0; i-- {
+		switch textBeforeCursor[i] {
+		case ')':
+			depth++
+		case '(':
+			if depth > 0 {
+				depth--
+			} else {
+				// Found the matching open paren
+				before := textBeforeCursor[:i]
+				match := macroNameRegex.FindString(before)
+				if match == "" {
+					return "", "", false
+				}
+				return match, textBeforeCursor[i+1:], true
+			}
+		}
+	}
+	return "", "", false
+}
+
+func extractProvidedArgs(argsText string) map[string]bool {
+	indices := kwargRegex.FindAllStringSubmatchIndex(argsText, -1)
+	if len(indices) == 0 {
+		return nil
+	}
+	provided := make(map[string]bool)
+	for _, idx := range indices {
+		// idx[0..1] = full match, idx[2..3] = capture group
+		matchEnd := idx[1]
+		// Skip if followed by '=' (i.e., this is == comparison)
+		if matchEnd < len(argsText) && argsText[matchEnd] == '=' {
+			continue
+		}
+		provided[argsText[idx[2]:idx[3]]] = true
+	}
+	if len(provided) == 0 {
+		return nil
+	}
+	return provided
+}
+
+func (s *State) findMacroByName(name string) (Macro, bool) {
+	for _, macroMap := range s.DbtContext.MacroDetailMap {
+		if m, ok := macroMap[name]; ok {
+			return m, true
+		}
+	}
+	return Macro{}, false
+}
+
 func isInsideJinjaBlock(text string) bool {
 	return strings.Count(text, "{{") > strings.Count(text, "}}")
 }
@@ -574,6 +632,13 @@ func (s *State) TextDocumentCompletion(id int, uri string, position lsp.Position
 			s.DbtContext.VariableDetailMap,
 			getSuffix(lineText, textAfterCursor, "var"),
 		)
+	} else if macroName, argsText, ok := detectMacroCallContext(textBeforeCursor); ok {
+		if macro, found := s.findMacroByName(macroName); found {
+			items = getMacroArgCompletionItems(macro, extractProvidedArgs(argsText))
+		} else {
+			// Unknown function — fall through to macro name completions
+			items = getMacroCompletionItems(s.DbtContext.MacroDetailMap, s.DbtContext.ProjectYaml)
+		}
 	} else if jinjaBlockTriggerRegex.MatchString(textBeforeCursor) {
 		items = getMacroCompletionItems(s.DbtContext.MacroDetailMap, s.DbtContext.ProjectYaml)
 	} else {

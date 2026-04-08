@@ -171,6 +171,27 @@ func getColumnCompletionItems(modelNames []string, modelMap map[string]ModelDeta
 	return items
 }
 
+func getMacroArgCompletionItems(macro Macro, providedArgs map[string]bool) []lsp.CompletionItem {
+	items := make([]lsp.CompletionItem, 0, len(macro.Arguments))
+	for _, arg := range macro.Arguments {
+		if providedArgs[arg.Name] {
+			continue
+		}
+		detail := "required"
+		if arg.Default != "" {
+			detail = fmt.Sprintf("default: %s", arg.Default)
+		}
+		items = append(items, lsp.CompletionItem{
+			Label:      arg.Name,
+			Detail:     detail,
+			Kind:       completionKind.Variable,
+			InsertText: arg.Name + "=",
+			SortText:   "00" + arg.Name,
+		})
+	}
+	return items
+}
+
 func getScopeColumnCompletionItems(columns []parser.ScopeColumn) []lsp.CompletionItem {
 	items := make([]lsp.CompletionItem, 0, len(columns))
 	for _, col := range columns {

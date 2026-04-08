@@ -3,6 +3,7 @@ package analysis
 import (
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/j-clemons/dbt-language-server/analysis/parser"
@@ -333,6 +334,81 @@ func TestGetColumnCompletionItems(t *testing.T) {
 		}
 		if items[0].Documentation != "" {
 			t.Errorf("expected empty documentation, got %q", items[0].Documentation)
+		}
+	})
+}
+
+func TestGetMacroArgCompletionItems(t *testing.T) {
+	macro := Macro{
+		Name:        "my_macro",
+		ProjectName: "test",
+		Arguments:   []MacroArg{{Name: "arg1"}, {Name: "arg2", Default: "42"}, {Name: "arg3"}},
+	}
+
+	t.Run("3 args 0 provided", func(t *testing.T) {
+		items := getMacroArgCompletionItems(macro, nil)
+		if len(items) != 3 {
+			t.Fatalf("expected 3 items, got %d", len(items))
+		}
+	})
+
+	t.Run("1 arg already provided", func(t *testing.T) {
+		items := getMacroArgCompletionItems(macro, map[string]bool{"arg1": true})
+		if len(items) != 2 {
+			t.Fatalf("expected 2 items, got %d", len(items))
+		}
+		for _, item := range items {
+			if item.Label == "arg1" {
+				t.Error("should exclude already-provided arg1")
+			}
+		}
+	})
+
+	t.Run("all args provided", func(t *testing.T) {
+		items := getMacroArgCompletionItems(macro, map[string]bool{"arg1": true, "arg2": true, "arg3": true})
+		if len(items) != 0 {
+			t.Fatalf("expected 0 items, got %d", len(items))
+		}
+	})
+
+	t.Run("insert text ends with equals", func(t *testing.T) {
+		items := getMacroArgCompletionItems(macro, nil)
+		for _, item := range items {
+			if !strings.HasSuffix(item.InsertText, "=") {
+				t.Errorf("InsertText %q should end with '='", item.InsertText)
+			}
+		}
+	})
+
+	t.Run("kind is Variable", func(t *testing.T) {
+		items := getMacroArgCompletionItems(macro, nil)
+		for _, item := range items {
+			if item.Kind != completionKind.Variable {
+				t.Errorf("Kind: got %d, want %d", item.Kind, completionKind.Variable)
+			}
+		}
+	})
+
+	t.Run("sort text 00 prefix", func(t *testing.T) {
+		items := getMacroArgCompletionItems(macro, nil)
+		for _, item := range items {
+			if !strings.HasPrefix(item.SortText, "00") {
+				t.Errorf("SortText %q should start with '00'", item.SortText)
+			}
+		}
+	})
+
+	t.Run("detail shows default or required", func(t *testing.T) {
+		items := getMacroArgCompletionItems(macro, nil)
+		detailMap := map[string]string{}
+		for _, item := range items {
+			detailMap[item.Label] = item.Detail
+		}
+		if detailMap["arg1"] != "required" {
+			t.Errorf("arg1 detail: got %q, want %q", detailMap["arg1"], "required")
+		}
+		if detailMap["arg2"] != "default: 42" {
+			t.Errorf("arg2 detail: got %q, want %q", detailMap["arg2"], "default: 42")
 		}
 	})
 }
