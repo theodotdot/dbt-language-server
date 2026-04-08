@@ -64,6 +64,13 @@ func NewState() State {
 	}
 }
 
+func (s *State) Snapshot(uri string) (Document, DbtContext, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	doc, ok := s.Documents[uri]
+	return doc, s.DbtContext, ok
+}
+
 func (s *State) SetFusionEnabled(enabled bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
