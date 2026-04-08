@@ -5,6 +5,7 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/j-clemons/dbt-language-server/analysis/parser"
 	"github.com/j-clemons/dbt-language-server/lsp"
 	"github.com/j-clemons/dbt-language-server/lsp/completionKind"
 )
@@ -332,6 +333,93 @@ func TestGetColumnCompletionItems(t *testing.T) {
 		}
 		if items[0].Documentation != "" {
 			t.Errorf("expected empty documentation, got %q", items[0].Documentation)
+		}
+	})
+}
+
+func TestGetScopeColumnCompletionItems(t *testing.T) {
+	t.Run("single source", func(t *testing.T) {
+		items := getScopeColumnCompletionItems([]parser.ScopeColumn{
+			{Name: "customer_id", Source: "customers"},
+		})
+		if len(items) != 1 {
+			t.Fatalf("expected 1 item, got %d", len(items))
+		}
+		if items[0].Label != "customer_id" {
+			t.Errorf("Label: got %q, want %q", items[0].Label, "customer_id")
+		}
+		if items[0].Kind != completionKind.Field {
+			t.Errorf("Kind: got %d, want %d", items[0].Kind, completionKind.Field)
+		}
+		if items[0].Detail != "Column from customers" {
+			t.Errorf("Detail: got %q, want %q", items[0].Detail, "Column from customers")
+		}
+		if items[0].SortText != "0customer_id" {
+			t.Errorf("SortText: got %q, want %q", items[0].SortText, "0customer_id")
+		}
+	})
+
+	t.Run("multiple sources no dedup", func(t *testing.T) {
+		items := getScopeColumnCompletionItems([]parser.ScopeColumn{
+			{Name: "id", Source: "orders"},
+			{Name: "id", Source: "customers"},
+		})
+		if len(items) != 2 {
+			t.Fatalf("expected 2 items (no dedup), got %d", len(items))
+		}
+		details := map[string]bool{}
+		for _, item := range items {
+			details[item.Detail] = true
+		}
+		if !details["Column from orders"] || !details["Column from customers"] {
+			t.Errorf("expected distinct details, got %v", details)
+		}
+	})
+
+	t.Run("with alias shows source in detail", func(t *testing.T) {
+		items := getScopeColumnCompletionItems([]parser.ScopeColumn{
+			{Name: "total", Source: "orders", Qualified: "o.total"},
+		})
+		if len(items) != 1 {
+			t.Fatalf("expected 1 item, got %d", len(items))
+		}
+		if items[0].Detail != "Column from orders" {
+			t.Errorf("Detail: got %q, want %q", items[0].Detail, "Column from orders")
+		}
+	})
+
+	t.Run("sort text 0 prefix", func(t *testing.T) {
+		items := getScopeColumnCompletionItems([]parser.ScopeColumn{
+			{Name: "amount", Source: "payments"},
+			{Name: "id", Source: "payments"},
+		})
+		for _, item := range items {
+			expected := "0" + item.Label
+			if item.SortText != expected {
+				t.Errorf("SortText: got %q, want %q", item.SortText, expected)
+			}
+		}
+	})
+
+	t.Run("empty input", func(t *testing.T) {
+		items := getScopeColumnCompletionItems(nil)
+		if items == nil {
+			t.Fatal("expected empty slice, got nil")
+		}
+		if len(items) != 0 {
+			t.Fatalf("expected 0 items, got %d", len(items))
+		}
+	})
+
+	t.Run("description carried through", func(t *testing.T) {
+		items := getScopeColumnCompletionItems([]parser.ScopeColumn{
+			{Name: "amount", Source: "payments", Description: "Payment amount"},
+		})
+		if len(items) != 1 {
+			t.Fatalf("expected 1 item, got %d", len(items))
+		}
+		if items[0].Documentation != "Payment amount" {
+			t.Errorf("Documentation: got %q, want %q", items[0].Documentation, "Payment amount")
 		}
 	})
 }

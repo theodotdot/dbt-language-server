@@ -11,7 +11,6 @@ import (
 	"github.com/j-clemons/dbt-language-server/analysis/parser"
 	"github.com/j-clemons/dbt-language-server/docs"
 	"github.com/j-clemons/dbt-language-server/lsp"
-	"github.com/j-clemons/dbt-language-server/lsp/completionKind"
 	"github.com/j-clemons/dbt-language-server/util"
 )
 
@@ -442,24 +441,34 @@ func (s *State) buildModelColumns() parser.ModelColumns {
 	return mc
 }
 
-func scopeColumnsToCompletionItems(cols []parser.ScopeColumn) []lsp.CompletionItem {
-	seen := make(map[string]bool)
-	items := make([]lsp.CompletionItem, 0, len(cols))
-	for _, col := range cols {
-		if seen[col.Name] {
+func (s *State) resolveSourceColumns(scope *parser.QueryScope) []parser.ScopeColumn {
+	var cols []parser.ScopeColumn
+	for _, src := range scope.Sources {
+		if src.Kind != parser.SourceKindSource {
 			continue
 		}
-		seen[col.Name] = true
-		items = append(items, lsp.CompletionItem{
-			Label:         col.Name,
-			Detail:        fmt.Sprintf("Column from %s", col.Source),
-			Documentation: col.Description,
-			Kind:          completionKind.Field,
-			InsertText:    col.Name,
-			SortText:      col.Name,
-		})
+		source, ok := s.DbtContext.SourceDetailMap[src.SourceName]
+		if !ok {
+			continue
+		}
+		table, ok := source.Tables[src.Name]
+		if !ok {
+			continue
+		}
+		sourceLabel := src.Alias
+		if sourceLabel == "" {
+			sourceLabel = src.Name
+		}
+		for _, col := range table.Columns {
+			cols = append(cols, parser.ScopeColumn{
+				Name:        col.Name,
+				Source:      sourceLabel,
+				Qualified:   sourceLabel + "." + col.Name,
+				Description: col.Description,
+			})
+		}
 	}
-	return items
+	return cols
 }
 
 func (s *State) ResolveColumnsAtPosition(uri, aliasPrefix string) []parser.ScopeColumn {
@@ -517,11 +526,13 @@ func (s *State) TextDocumentCompletion(id int, uri string, position lsp.Position
 	} else if jinjaBlockTriggerRegex.MatchString(textBeforeCursor) {
 		items = getMacroCompletionItems(s.DbtContext.MacroDetailMap, s.DbtContext.ProjectYaml)
 	} else {
-		scopeCols := s.ResolveColumnsAtPosition(uri, "")
-		if len(scopeCols) > 0 {
-			items = scopeColumnsToCompletionItems(scopeCols)
+		doc := s.Documents[uri]
+		if doc.Scope != nil {
+			columns := s.ResolveColumnsAtPosition(uri, "")
+			columns = append(columns, s.resolveSourceColumns(doc.Scope)...)
+			items = getScopeColumnCompletionItems(columns)
 		} else {
-			refModels := getReferencedModels(s.Documents[uri].Tokens)
+			refModels := getReferencedModels(doc.Tokens)
 			items = getColumnCompletionItems(refModels, s.DbtContext.ModelDetailMap)
 		}
 		items = append(items, s.DbtContext.Dialect.FunctionCompletionItems()...)

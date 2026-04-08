@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/j-clemons/dbt-language-server/analysis/parser"
 	"github.com/j-clemons/dbt-language-server/lsp"
 	"github.com/j-clemons/dbt-language-server/lsp/completionKind"
 )
@@ -167,6 +168,21 @@ func getColumnCompletionItems(modelNames []string, modelMap map[string]ModelDeta
 		}
 	}
 
+	return items
+}
+
+func getScopeColumnCompletionItems(columns []parser.ScopeColumn) []lsp.CompletionItem {
+	items := make([]lsp.CompletionItem, 0, len(columns))
+	for _, col := range columns {
+		items = append(items, lsp.CompletionItem{
+			Label:         col.Name,
+			Detail:        fmt.Sprintf("Column from %s", col.Source),
+			Documentation: col.Description,
+			Kind:          completionKind.Field,
+			InsertText:    col.Name,
+			SortText:      "0" + col.Name,
+		})
+	}
 	return items
 }
 

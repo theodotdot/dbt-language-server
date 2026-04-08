@@ -552,6 +552,68 @@ func TestTextDocumentCompletion(t *testing.T) {
 	}
 }
 
+func TestScopeColumnCompletion(t *testing.T) {
+	state := newTestState()
+	uri := "test://scope-completion.sql"
+
+	t.Run("source column completion", func(t *testing.T) {
+		state.parseDocument(uri, "select \nfrom {{ source('my_source', 'my_table') }}")
+		resp := state.TextDocumentCompletion(1, uri, lsp.Position{Line: 0, Character: 7})
+		foundId := false
+		foundName := false
+		for _, item := range resp.Result {
+			if item.Label == "id" && item.Kind == completionKind.Field {
+				foundId = true
+			}
+			if item.Label == "name" && item.Kind == completionKind.Field {
+				foundName = true
+			}
+		}
+		if !foundId {
+			t.Error("expected 'id' column from source")
+		}
+		if !foundName {
+			t.Error("expected 'name' column from source")
+		}
+	})
+
+	t.Run("source with no columns", func(t *testing.T) {
+		state.DbtContext.SourceDetailMap["empty_source"] = Source{
+			Name: "empty_source",
+			Tables: map[string]SourceTable{
+				"empty_table": {
+					Name:  "empty_table",
+					Table: "empty_source",
+				},
+			},
+		}
+		state.parseDocument(uri, "select \nfrom {{ source('empty_source', 'empty_table') }}")
+		resp := state.TextDocumentCompletion(1, uri, lsp.Position{Line: 0, Character: 7})
+		for _, item := range resp.Result {
+			if item.Kind == completionKind.Field {
+				t.Errorf("expected no column items, got %q", item.Label)
+			}
+		}
+	})
+
+	t.Run("backward compat nil scope", func(t *testing.T) {
+		state.parseDocument(uri, "select \nfrom {{ ref('customers') }}")
+		doc := state.Documents[uri]
+		doc.Scope = nil
+		state.Documents[uri] = doc
+		resp := state.TextDocumentCompletion(1, uri, lsp.Position{Line: 0, Character: 7})
+		foundColumn := false
+		for _, item := range resp.Result {
+			if item.Label == "customer_id" && item.Kind == completionKind.Field {
+				foundColumn = true
+			}
+		}
+		if !foundColumn {
+			t.Error("expected 'customer_id' from fallback path")
+		}
+	})
+}
+
 func TestDocumentScopePopulated(t *testing.T) {
 	state := newTestState()
 	uri := "test://scope.sql"
