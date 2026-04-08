@@ -134,16 +134,22 @@ func (s *State) parseDocument(uri, text string) {
 }
 
 func (s *State) OpenDocument(uri, text string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	filePath := strings.TrimPrefix(uri, "file://")
 	s.refreshDbtContext(filepath.Dir(filePath))
 	s.parseDocument(uri, text)
 }
 
 func (s *State) UpdateDocument(uri, text string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.parseDocument(uri, text)
 }
 
 func (s *State) UpdateDocumentIncremental(uri string, changes []lsp.TextDocumentContentChangeEvent) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	doc, exists := s.Documents[uri]
 	if !exists {
 		return
@@ -213,8 +219,16 @@ func (s *State) applyIncrementalChange(text string, change lsp.TextDocumentConte
 }
 
 func (s *State) SaveDocument(uri string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	filePath := strings.TrimPrefix(uri, "file://")
 	s.refreshDbtContext(filepath.Dir(filePath))
+}
+
+func (s *State) CloseDocument(uri string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.Documents, uri)
 }
 
 func (s *State) Hover(id int, uri string, position lsp.Position) lsp.HoverResponse {

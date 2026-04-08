@@ -8,10 +8,12 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"strings"
 
 	flag "github.com/spf13/pflag"
 
 	"github.com/j-clemons/dbt-language-server/analysis"
+	"github.com/j-clemons/dbt-language-server/analysis/diagnostics"
 	"github.com/j-clemons/dbt-language-server/analysis/fusion"
 	"github.com/j-clemons/dbt-language-server/lsp"
 	"github.com/j-clemons/dbt-language-server/rpc"
@@ -64,10 +66,22 @@ func main() {
 		}()
 	}
 
+	writer := os.Stdout
+
+	var diagEngine *diagnostics.Engine
+	if *fusion == "" {
+		diagEngine = diagnostics.NewEngine(writer, &state,
+			diagnostics.CheckRefs,
+			diagnostics.CheckSources,
+			diagnostics.CheckVars,
+			diagnostics.CheckMacros,
+			diagnostics.CheckJinja,
+		)
+	}
+
 	logger.Println("dbt Language Server Started!")
 	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Split(rpc.Split)
-	writer := os.Stdout
 
 	for scanner.Scan() {
 		msg := scanner.Bytes()
@@ -75,11 +89,11 @@ func main() {
 		if err != nil {
 			logger.Printf("Got an error: %s", err)
 		}
-		handleMessage(logger, writer, &state, method, contents)
+		handleMessage(logger, writer, &state, diagEngine, method, contents)
 	}
 }
 
-func handleMessage(logger *log.Logger, writer io.Writer, state *analysis.State, method string, contents []byte) {
+func handleMessage(logger *log.Logger, writer io.Writer, state *analysis.State, diagEngine *diagnostics.Engine, method string, contents []byte) {
 	logger.Printf("Received msg with method: %s", method)
 
 	switch method {
@@ -108,6 +122,10 @@ func handleMessage(logger *log.Logger, writer io.Writer, state *analysis.State, 
 		logger.Printf("Opened: %s", request.Params.TextDocument.URI)
 
 		fusion.FusionCompile(state, request.Params.TextDocument.URI, logger, writer)
+
+		if diagEngine != nil && strings.HasSuffix(request.Params.TextDocument.URI, ".sql") {
+			diagEngine.RunImmediate(request.Params.TextDocument.URI)
+		}
 	case "textDocument/didSave":
 		logger.Print("textDocument/didSave")
 		var request lsp.DidSaveTextDocumentNotification
@@ -120,6 +138,10 @@ func handleMessage(logger *log.Logger, writer io.Writer, state *analysis.State, 
 		state.SaveDocument(request.Params.TextDocument.URI)
 
 		fusion.FusionCompile(state, request.Params.TextDocument.URI, logger, writer)
+
+		if diagEngine != nil && strings.HasSuffix(request.Params.TextDocument.URI, ".sql") {
+			diagEngine.RunImmediate(request.Params.TextDocument.URI)
+		}
 	case "textDocument/didChange":
 		var request lsp.TextDocumentDidChangeNotification
 		if err := json.Unmarshal(contents, &request); err != nil {
@@ -129,6 +151,21 @@ func handleMessage(logger *log.Logger, writer io.Writer, state *analysis.State, 
 
 		logger.Printf("Changed: %s", request.Params.TextDocument.URI)
 		state.UpdateDocumentIncremental(request.Params.TextDocument.URI, request.Params.ContentChanges)
+
+		if diagEngine != nil && strings.HasSuffix(request.Params.TextDocument.URI, ".sql") {
+			diagEngine.RunDebounced(request.Params.TextDocument.URI)
+		}
+	case "textDocument/didClose":
+		var request lsp.DidCloseTextDocumentNotification
+		if err := json.Unmarshal(contents, &request); err != nil {
+			logger.Printf("textDocument/didClose: %s", err)
+			return
+		}
+		logger.Printf("Closed: %s", request.Params.TextDocument.URI)
+		if diagEngine != nil {
+			diagEngine.Clear(request.Params.TextDocument.URI)
+		}
+		state.CloseDocument(request.Params.TextDocument.URI)
 	case "textDocument/hover":
 		var request lsp.HoverRequest
 		if err := json.Unmarshal(contents, &request); err != nil {
