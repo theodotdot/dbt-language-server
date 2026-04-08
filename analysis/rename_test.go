@@ -1,8 +1,10 @@
 package analysis
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/j-clemons/dbt-language-server/analysis/parser"
@@ -295,5 +297,316 @@ func TestFindModelRefs_EditRangeCorrect(t *testing.T) {
 				t.Errorf("edit range width: got %d, want %d (file %s)", width, len("orders"), docEdit.TextDocument.URI)
 			}
 		}
+	}
+}
+
+// --- Rename handler tests ---
+
+func TestRenameInvalidIdentifier(t *testing.T) {
+	uri := "file:///test.sql"
+	sql := "select * from {{ ref('orders') }}"
+	s := newRenameState(uri, sql)
+	s.DbtContext.ModelDetailMap = map[string]ModelDetails{
+		"orders": {URI: "/project/models/orders.sql"},
+	}
+
+	for _, bad := range []string{"my model", "1orders", "orders!", ""} {
+		resp := s.Rename(1, uri, lsp.Position{Line: 0, Character: 22}, bad)
+		if resp.Error == nil {
+			t.Errorf("expected error for newName=%q, got nil", bad)
+		}
+		if resp.Error != nil && resp.Error.Code != lsp.ErrCodeInvalidParams {
+			t.Errorf("expected code %d, got %d", lsp.ErrCodeInvalidParams, resp.Error.Code)
+		}
+	}
+}
+
+func TestRenameModelConflict(t *testing.T) {
+	uri := "file:///test.sql"
+	sql := "select * from {{ ref('orders') }}"
+	s := newRenameState(uri, sql)
+	s.DbtContext.ModelDetailMap = map[string]ModelDetails{
+		"orders":    {URI: "/project/models/orders.sql"},
+		"customers": {URI: "/project/models/customers.sql"},
+	}
+
+	resp := s.Rename(1, uri, lsp.Position{Line: 0, Character: 22}, "customers")
+	if resp.Error == nil {
+		t.Fatal("expected error for conflicting model name")
+	}
+	if resp.Error.Code != lsp.ErrCodeInvalidParams {
+		t.Errorf("expected code %d, got %d", lsp.ErrCodeInvalidParams, resp.Error.Code)
+	}
+}
+
+func TestRenameColumnConflict(t *testing.T) {
+	uri := "file:///models/schema.yml"
+	s := NewState()
+	s.DbtContext.ModelDetailMap = map[string]ModelDetails{
+		"orders": {
+			SchemaURI: "/models/schema.yml",
+			SchemaRange: lsp.Range{
+				Start: lsp.Position{Line: 3, Character: 8},
+				End:   lsp.Position{Line: 3, Character: 8},
+			},
+			Columns: []Column{
+				{Name: "id", Position: lsp.Position{Line: 5, Character: 10}},
+				{Name: "name", Position: lsp.Position{Line: 6, Character: 10}},
+			},
+		},
+	}
+
+	resp := s.Rename(1, uri, lsp.Position{Line: 5, Character: 10}, "name")
+	if resp.Error == nil {
+		t.Fatal("expected error for conflicting column name")
+	}
+}
+
+func TestRenameSameNameNoop(t *testing.T) {
+	uri := "file:///test.sql"
+	sql := "select * from {{ ref('orders') }}"
+	s := newRenameState(uri, sql)
+	s.DbtContext.ModelDetailMap = map[string]ModelDetails{
+		"orders": {URI: "/project/models/orders.sql"},
+	}
+
+	resp := s.Rename(1, uri, lsp.Position{Line: 0, Character: 22}, "orders")
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %s", resp.Error.Message)
+	}
+	if resp.Result != nil && len(resp.Result.DocumentChanges) > 0 {
+		t.Error("expected empty workspace edit for noop rename")
+	}
+}
+
+func TestRenameModelRenameFile(t *testing.T) {
+	uri := "file:///test.sql"
+	sql := "select * from {{ ref('orders') }}"
+	s := newRenameState(uri, sql)
+	s.DbtContext.ModelDetailMap = map[string]ModelDetails{
+		"orders": {URI: "/project/models/orders.sql"},
+	}
+
+	resp := s.Rename(1, uri, lsp.Position{Line: 0, Character: 22}, "purchases")
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %s", resp.Error.Message)
+	}
+	if resp.Result == nil {
+		t.Fatal("expected non-nil result")
+	}
+
+	// Find RenameFile entry
+	found := false
+	for _, dc := range resp.Result.DocumentChanges {
+		if dc.RenameFileValue != nil {
+			found = true
+			if dc.RenameFileValue.Kind != "rename" {
+				t.Errorf("kind: got %q, want %q", dc.RenameFileValue.Kind, "rename")
+			}
+			if dc.RenameFileValue.OldURI != "file:///project/models/orders.sql" {
+				t.Errorf("oldURI: got %q", dc.RenameFileValue.OldURI)
+			}
+			if dc.RenameFileValue.NewURI != "file:///project/models/purchases.sql" {
+				t.Errorf("newURI: got %q", dc.RenameFileValue.NewURI)
+			}
+		}
+	}
+	if !found {
+		t.Error("expected RenameFile in documentChanges")
+	}
+}
+
+func TestRenameModelSchemaEdit(t *testing.T) {
+	uri := "file:///test.sql"
+	sql := "select * from {{ ref('orders') }}"
+	s := newRenameState(uri, sql)
+	s.DbtContext.ModelDetailMap = map[string]ModelDetails{
+		"orders": {
+			URI:       "/project/models/orders.sql",
+			SchemaURI: "/project/models/schema.yml",
+			SchemaRange: lsp.Range{
+				Start: lsp.Position{Line: 5, Character: 10},
+				End:   lsp.Position{Line: 5, Character: 10},
+			},
+		},
+	}
+
+	resp := s.Rename(1, uri, lsp.Position{Line: 0, Character: 22}, "purchases")
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %s", resp.Error.Message)
+	}
+
+	// Find schema edit
+	found := false
+	for _, dc := range resp.Result.DocumentChanges {
+		if dc.TextDocumentEditValue != nil && dc.TextDocumentEditValue.TextDocument.URI == "file:///project/models/schema.yml" {
+			found = true
+			if len(dc.TextDocumentEditValue.Edits) != 1 {
+				t.Fatalf("expected 1 edit, got %d", len(dc.TextDocumentEditValue.Edits))
+			}
+			edit := dc.TextDocumentEditValue.Edits[0]
+			if edit.Range.Start.Character != 10 || edit.Range.End.Character != 16 {
+				t.Errorf("range: got %d-%d, want 10-16", edit.Range.Start.Character, edit.Range.End.Character)
+			}
+			if edit.NewText != "purchases" {
+				t.Errorf("newText: got %q, want %q", edit.NewText, "purchases")
+			}
+		}
+	}
+	if !found {
+		t.Error("expected schema TextDocumentEdit")
+	}
+}
+
+func TestRenameModelNoSchemaWhenEmpty(t *testing.T) {
+	uri := "file:///test.sql"
+	sql := "select * from {{ ref('orders') }}"
+	s := newRenameState(uri, sql)
+	s.DbtContext.ModelDetailMap = map[string]ModelDetails{
+		"orders": {URI: "/project/models/orders.sql", SchemaURI: ""},
+	}
+
+	resp := s.Rename(1, uri, lsp.Position{Line: 0, Character: 22}, "purchases")
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %s", resp.Error.Message)
+	}
+	for _, dc := range resp.Result.DocumentChanges {
+		if dc.TextDocumentEditValue != nil {
+			t.Error("expected no TextDocumentEdit when SchemaURI is empty")
+		}
+	}
+}
+
+func TestRenameModelPreservesDir(t *testing.T) {
+	uri := "file:///test.sql"
+	sql := "select * from {{ ref('orders') }}"
+	s := newRenameState(uri, sql)
+	s.DbtContext.ModelDetailMap = map[string]ModelDetails{
+		"orders": {URI: "/project/models/staging/orders.sql"},
+	}
+
+	resp := s.Rename(1, uri, lsp.Position{Line: 0, Character: 22}, "purchases")
+	for _, dc := range resp.Result.DocumentChanges {
+		if dc.RenameFileValue != nil {
+			if dc.RenameFileValue.NewURI != "file:///project/models/staging/purchases.sql" {
+				t.Errorf("newURI: got %q, want file:///project/models/staging/purchases.sql", dc.RenameFileValue.NewURI)
+			}
+		}
+	}
+}
+
+func TestRenameColumnSchemaEdit(t *testing.T) {
+	uri := "file:///models/schema.yml"
+	s := NewState()
+	s.DbtContext.ModelDetailMap = map[string]ModelDetails{
+		"orders": {
+			SchemaURI: "/models/schema.yml",
+			SchemaRange: lsp.Range{
+				Start: lsp.Position{Line: 3, Character: 8},
+				End:   lsp.Position{Line: 3, Character: 8},
+			},
+			Columns: []Column{
+				{Name: "order_id", Position: lsp.Position{Line: 8, Character: 12}},
+			},
+		},
+	}
+
+	resp := s.Rename(1, uri, lsp.Position{Line: 8, Character: 14}, "purchase_id")
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %s", resp.Error.Message)
+	}
+	if resp.Result == nil || len(resp.Result.DocumentChanges) != 1 {
+		t.Fatalf("expected exactly 1 documentChange, got %v", resp.Result)
+	}
+	dc := resp.Result.DocumentChanges[0]
+	if dc.TextDocumentEditValue == nil {
+		t.Fatal("expected TextDocumentEdit, not RenameFile")
+	}
+	if dc.RenameFileValue != nil {
+		t.Error("expected no RenameFile for column rename")
+	}
+	edit := dc.TextDocumentEditValue.Edits[0]
+	if edit.Range.Start.Character != 12 || edit.Range.End.Character != 20 {
+		t.Errorf("range: got %d-%d, want 12-20", edit.Range.Start.Character, edit.Range.End.Character)
+	}
+	if edit.NewText != "purchase_id" {
+		t.Errorf("newText: got %q", edit.NewText)
+	}
+}
+
+func TestRenameAllURIsHavePrefix(t *testing.T) {
+	uri := "file:///test.sql"
+	sql := "select * from {{ ref('orders') }}"
+	s := newRenameState(uri, sql)
+	s.DbtContext.ModelDetailMap = map[string]ModelDetails{
+		"orders": {
+			URI:       "/project/models/orders.sql",
+			SchemaURI: "/project/models/schema.yml",
+			SchemaRange: lsp.Range{
+				Start: lsp.Position{Line: 5, Character: 10},
+				End:   lsp.Position{Line: 5, Character: 10},
+			},
+		},
+	}
+
+	resp := s.Rename(1, uri, lsp.Position{Line: 0, Character: 22}, "purchases")
+	for _, dc := range resp.Result.DocumentChanges {
+		if dc.RenameFileValue != nil {
+			if !strings.HasPrefix(dc.RenameFileValue.OldURI, "file://") {
+				t.Errorf("OldURI missing file:// prefix: %s", dc.RenameFileValue.OldURI)
+			}
+			if !strings.HasPrefix(dc.RenameFileValue.NewURI, "file://") {
+				t.Errorf("NewURI missing file:// prefix: %s", dc.RenameFileValue.NewURI)
+			}
+		}
+		if dc.TextDocumentEditValue != nil {
+			if !strings.HasPrefix(dc.TextDocumentEditValue.TextDocument.URI, "file://") {
+				t.Errorf("TextDocument.URI missing file:// prefix: %s", dc.TextDocumentEditValue.TextDocument.URI)
+			}
+		}
+	}
+}
+
+func TestRenameSerializesSuccess(t *testing.T) {
+	uri := "file:///test.sql"
+	sql := "select * from {{ ref('orders') }}"
+	s := newRenameState(uri, sql)
+	s.DbtContext.ModelDetailMap = map[string]ModelDetails{
+		"orders": {URI: "/project/models/orders.sql"},
+	}
+
+	resp := s.Rename(1, uri, lsp.Position{Line: 0, Character: 22}, "purchases")
+	data, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	str := string(data)
+	if !strings.Contains(str, `"result"`) {
+		t.Error("expected result in JSON")
+	}
+	if !strings.Contains(str, `"documentChanges"`) {
+		t.Errorf("expected documentChanges in JSON: %s", str)
+	}
+}
+
+func TestRenameSerializesError(t *testing.T) {
+	uri := "file:///test.sql"
+	sql := "select * from {{ ref('orders') }}"
+	s := newRenameState(uri, sql)
+	s.DbtContext.ModelDetailMap = map[string]ModelDetails{
+		"orders": {URI: "/project/models/orders.sql"},
+	}
+
+	resp := s.Rename(1, uri, lsp.Position{Line: 0, Character: 22}, "bad name")
+	data, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	str := string(data)
+	if !strings.Contains(str, `"error"`) {
+		t.Error("expected error in JSON")
+	}
+	if !strings.Contains(str, `"code":-32602`) {
+		t.Errorf("expected code -32602 in JSON: %s", str)
 	}
 }
