@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/j-clemons/dbt-language-server/analysis/parser"
@@ -948,6 +949,152 @@ join {{ ref('customers') }} c on o.customer_id = c.customer_id`
 		}
 		if len(scope.Sources) < 3 {
 			t.Errorf("expected >= 3 sources in order_details, got %d", len(scope.Sources))
+		}
+	})
+}
+
+func hasLabel(items []lsp.CompletionItem, label string) bool {
+	for _, item := range items {
+		if item.Label == label {
+			return true
+		}
+	}
+	return false
+}
+
+func labels(items []lsp.CompletionItem) []string {
+	out := make([]string, len(items))
+	for i, item := range items {
+		out[i] = item.Label
+	}
+	return out
+}
+
+func TestIntegrationCompletion(t *testing.T) {
+	state, _ := integrationTestState(t)
+	uri := "test://integration-completion.sql"
+
+	t.Run("source column completion", func(t *testing.T) {
+		state.parseDocument(uri, "select \nfrom {{ source('stripe', 'payments') }}")
+		resp := state.TextDocumentCompletion(1, uri, lsp.Position{Line: 0, Character: 7})
+		if !hasLabel(resp.Result, "payment_id") {
+			t.Errorf("missing payment_id in %v", labels(resp.Result))
+		}
+		if !hasLabel(resp.Result, "amount") {
+			t.Errorf("missing amount in %v", labels(resp.Result))
+		}
+		if !hasLabel(resp.Result, "payment_method") {
+			t.Errorf("missing payment_method in %v", labels(resp.Result))
+		}
+		// Verify source columns have Field kind
+		for _, item := range resp.Result {
+			if item.Label == "payment_id" && item.Kind != completionKind.Field {
+				t.Errorf("payment_id kind: got %d, want %d", item.Kind, completionKind.Field)
+			}
+		}
+	})
+
+	t.Run("CTE column completion", func(t *testing.T) {
+		sql := `with cte as (
+    select customer_id, first_name from {{ ref('customers') }}
+)
+select  from cte`
+		state.parseDocument(uri, sql)
+		resp := state.TextDocumentCompletion(1, uri, lsp.Position{Line: 3, Character: 7})
+		if !hasLabel(resp.Result, "customer_id") {
+			t.Errorf("missing customer_id in %v", labels(resp.Result))
+		}
+		if !hasLabel(resp.Result, "first_name") {
+			t.Errorf("missing first_name in %v", labels(resp.Result))
+		}
+		// Should NOT contain columns not selected in the CTE
+		if hasLabel(resp.Result, "last_name") {
+			t.Errorf("unexpected last_name (not in CTE) in %v", labels(resp.Result))
+		}
+	})
+
+	t.Run("JOIN dot-qualified completion", func(t *testing.T) {
+		sql := `select o. from {{ ref('orders') }} o
+join {{ ref('customers') }} c on o.customer_id = c.customer_id`
+		state.parseDocument(uri, sql)
+		resp := state.TextDocumentCompletion(1, uri, lsp.Position{Line: 0, Character: 9})
+		if !hasLabel(resp.Result, "order_id") {
+			t.Errorf("missing order_id in %v", labels(resp.Result))
+		}
+		// Should only contain orders columns, not customers
+		if hasLabel(resp.Result, "first_name") {
+			t.Errorf("unexpected first_name (from customers) in orders dot-qualified: %v", labels(resp.Result))
+		}
+		// Verify FilterText is set
+		for _, item := range resp.Result {
+			if item.Label == "order_id" {
+				if item.FilterText != "o.order_id" {
+					t.Errorf("FilterText: got %q, want %q", item.FilterText, "o.order_id")
+				}
+				if item.TextEdit == nil {
+					t.Error("expected TextEdit on dot-qualified item")
+				}
+				return
+			}
+		}
+		t.Error("order_id not found")
+	})
+
+	t.Run("sort text ordering", func(t *testing.T) {
+		// Ensure dialect is set so function completions are returned
+		state.DbtContext.Dialect = docs.Dialect("snowflake")
+		state.parseDocument(uri, "select  from {{ ref('customers') }}")
+		resp := state.TextDocumentCompletion(1, uri, lsp.Position{Line: 0, Character: 7})
+
+		hasColumnWith0 := false
+		hasFunctionWith2 := false
+		for _, item := range resp.Result {
+			if item.Kind == completionKind.Field && len(item.SortText) > 0 && item.SortText[0] == '0' {
+				hasColumnWith0 = true
+			}
+			if item.Kind == completionKind.Function && len(item.SortText) > 0 && item.SortText[0] == '2' {
+				hasFunctionWith2 = true
+			}
+		}
+		if !hasColumnWith0 {
+			t.Error("expected columns with SortText prefix '0'")
+		}
+		if !hasFunctionWith2 {
+			t.Error("expected functions with SortText prefix '2'")
+		}
+	})
+
+	t.Run("code action SELECT star expansion", func(t *testing.T) {
+		state.parseDocument(uri, "select * from {{ ref('customers') }}")
+		resp := state.TextDocumentCodeAction(1, uri, lsp.Range{
+			Start: lsp.Position{Line: 0, Character: 7},
+			End:   lsp.Position{Line: 0, Character: 8},
+		})
+		if len(resp.Result) != 1 {
+			t.Fatalf("expected 1 code action, got %d", len(resp.Result))
+		}
+		action := resp.Result[0]
+		if action.Title != "Expand SELECT *" {
+			t.Errorf("title: got %q", action.Title)
+		}
+		if action.Edit == nil {
+			t.Fatal("expected edit, got nil")
+		}
+		edits := action.Edit.Changes[uri]
+		if len(edits) != 1 {
+			t.Fatalf("expected 1 edit, got %d", len(edits))
+		}
+		// Verify range covers the * token at column 7
+		if edits[0].Range.Start.Character != 7 || edits[0].Range.End.Character != 8 {
+			t.Errorf("edit range: got %v, want col 7-8", edits[0].Range)
+		}
+		// customers has 7 columns
+		newText := edits[0].NewText
+		for _, col := range []string{"customer_id", "first_name", "last_name", "first_order",
+			"most_recent_order", "number_of_orders", "total_order_amount"} {
+			if !strings.Contains(newText, col) {
+				t.Errorf("missing column %q in expansion: %q", col, newText)
+			}
 		}
 	})
 }
