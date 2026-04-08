@@ -10,6 +10,7 @@ import (
 	"github.com/j-clemons/dbt-language-server/analysis/parser"
 	"github.com/j-clemons/dbt-language-server/docs"
 	"github.com/j-clemons/dbt-language-server/lsp"
+	"github.com/j-clemons/dbt-language-server/testutils"
 )
 
 func newRenameState(uri, sql string) *State {
@@ -154,17 +155,17 @@ func TestPrepareRenameRangeWidth(t *testing.T) {
 
 // --- findModelRefs tests ---
 
-func testdataRoot(t *testing.T) string {
+func testdataPath(t *testing.T, rel string) string {
 	t.Helper()
-	wd, err := os.Getwd()
+	p, err := testutils.GetTestdataPath(rel)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return filepath.Join(filepath.Dir(wd), "testdata")
+	return p
 }
 
 func TestFindModelRefs_SingleFile(t *testing.T) {
-	root := testdataRoot(t)
+	root := testdataPath(t, "")
 	s := NewState()
 	s.DbtContext.ProjectRoot = root
 	s.DbtContext.Dialect = docs.Dialect("snowflake")
@@ -182,7 +183,7 @@ func TestFindModelRefs_SingleFile(t *testing.T) {
 }
 
 func TestFindModelRefs_MultipleFiles(t *testing.T) {
-	root := testdataRoot(t)
+	root := testdataPath(t, "")
 	s := NewState()
 	s.DbtContext.ProjectRoot = root
 	s.DbtContext.Dialect = docs.Dialect("snowflake")
@@ -196,7 +197,7 @@ func TestFindModelRefs_MultipleFiles(t *testing.T) {
 }
 
 func TestFindModelRefs_SkipsNonMatching(t *testing.T) {
-	root := testdataRoot(t)
+	root := testdataPath(t, "")
 	s := NewState()
 	s.DbtContext.ProjectRoot = root
 	s.DbtContext.Dialect = docs.Dialect("snowflake")
@@ -209,7 +210,7 @@ func TestFindModelRefs_SkipsNonMatching(t *testing.T) {
 }
 
 func TestFindModelRefs_SkipsCrossProjectRef(t *testing.T) {
-	root := testdataRoot(t)
+	root := testdataPath(t, "")
 	s := NewState()
 	s.DbtContext.ProjectRoot = root
 	s.DbtContext.Dialect = docs.Dialect("snowflake")
@@ -256,7 +257,7 @@ func TestFindModelRefs_UsesOpenDocuments(t *testing.T) {
 }
 
 func TestFindModelRefs_ReadsFromDisk(t *testing.T) {
-	root := testdataRoot(t)
+	root := testdataPath(t, "")
 	s := NewState()
 	s.DbtContext.ProjectRoot = root
 	s.DbtContext.Dialect = docs.Dialect("snowflake")
@@ -283,7 +284,7 @@ func TestFindModelRefs_SkipsMissingFiles(t *testing.T) {
 }
 
 func TestFindModelRefs_EditRangeCorrect(t *testing.T) {
-	root := testdataRoot(t)
+	root := testdataPath(t, "")
 	s := NewState()
 	s.DbtContext.ProjectRoot = root
 	s.DbtContext.Dialect = docs.Dialect("snowflake")
@@ -608,5 +609,175 @@ func TestRenameSerializesError(t *testing.T) {
 	}
 	if !strings.Contains(str, `"code":-32602`) {
 		t.Errorf("expected code -32602 in JSON: %s", str)
+	}
+}
+
+// --- Table-driven name validation ---
+
+func TestIdentifierValidation(t *testing.T) {
+	tests := []struct {
+		input string
+		valid bool
+	}{
+		{"valid_name", true},
+		{"_leading_underscore", true},
+		{"Name123", true},
+		{"a", true},
+		{"", false},
+		{"123start", false},
+		{"has space", false},
+		{"special!char", false},
+		{"has-dash", false},
+	}
+
+	uri := "file:///test.sql"
+	sql := "select * from {{ ref('orders') }}"
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			s := newRenameState(uri, sql)
+			s.DbtContext.ModelDetailMap = map[string]ModelDetails{
+				"orders": {URI: "/project/models/orders.sql"},
+			}
+			resp := s.Rename(1, uri, lsp.Position{Line: 0, Character: 22}, tt.input)
+			if tt.valid && resp.Error != nil {
+				t.Errorf("expected valid, got error: %s", resp.Error.Message)
+			}
+			if !tt.valid {
+				if resp.Error == nil {
+					t.Errorf("expected error for %q, got nil", tt.input)
+				} else if resp.Error.Code != lsp.ErrCodeInvalidParams {
+					t.Errorf("expected code %d, got %d", lsp.ErrCodeInvalidParams, resp.Error.Code)
+				}
+			}
+		})
+	}
+}
+
+// --- Integration test using rename_fixtures ---
+
+
+func TestRenameIntegration_ModelRenameWithRefs(t *testing.T) {
+	root := testdataPath(t, "rename_fixtures")
+	uri := "file:///test.sql"
+	sql := "select * from {{ ref('orders') }}"
+	s := newRenameState(uri, sql)
+	s.DbtContext.ProjectRoot = root
+	s.DbtContext.Dialect = docs.Dialect("snowflake")
+	s.DbtContext.ProjectYaml.ModelPaths = AnnotatedField[[]string]{Value: []string{"models"}}
+	s.DbtContext.ModelDetailMap = map[string]ModelDetails{
+		"orders": {
+			URI:       root + "/models/target_model.sql",
+			SchemaURI: root + "/models/schema.yml",
+			SchemaRange: lsp.Range{
+				Start: lsp.Position{Line: 5, Character: 10},
+				End:   lsp.Position{Line: 5, Character: 10},
+			},
+		},
+	}
+
+	resp := s.Rename(1, uri, lsp.Position{Line: 0, Character: 22}, "purchases")
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %s", resp.Error.Message)
+	}
+	if resp.Result == nil {
+		t.Fatal("expected non-nil result")
+	}
+
+	// Should have: RenameFile + schema edit + ref edits from disk files
+	hasRenameFile := false
+	hasSchemaEdit := false
+	refEditCount := 0
+	for _, dc := range resp.Result.DocumentChanges {
+		if dc.RenameFileValue != nil {
+			hasRenameFile = true
+		}
+		if dc.TextDocumentEditValue != nil {
+			if strings.HasSuffix(dc.TextDocumentEditValue.TextDocument.URI, "schema.yml") {
+				hasSchemaEdit = true
+			} else {
+				refEditCount += len(dc.TextDocumentEditValue.Edits)
+			}
+		}
+	}
+	if !hasRenameFile {
+		t.Error("missing RenameFile entry")
+	}
+	if !hasSchemaEdit {
+		t.Error("missing schema TextDocumentEdit")
+	}
+	// target_model.sql has 1 ref, multi_ref.sql has 2 = 3 ref edits total
+	if refEditCount != 3 {
+		t.Errorf("expected 3 ref edits from disk, got %d", refEditCount)
+	}
+}
+
+func TestRenameIntegration_CrossProjectExcluded(t *testing.T) {
+	root := testdataPath(t, "rename_fixtures")
+	uri := "file:///test.sql"
+	sql := "select * from {{ ref('orders') }}"
+	s := newRenameState(uri, sql)
+	s.DbtContext.ProjectRoot = root
+	s.DbtContext.Dialect = docs.Dialect("snowflake")
+	s.DbtContext.ProjectYaml.ModelPaths = AnnotatedField[[]string]{Value: []string{"models"}}
+	s.DbtContext.ModelDetailMap = map[string]ModelDetails{
+		"orders": {URI: root + "/models/target_model.sql"},
+	}
+
+	resp := s.Rename(1, uri, lsp.Position{Line: 0, Character: 22}, "purchases")
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %s", resp.Error.Message)
+	}
+	if resp.Result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	for _, dc := range resp.Result.DocumentChanges {
+		if dc.TextDocumentEditValue != nil {
+			uri := dc.TextDocumentEditValue.TextDocument.URI
+			if strings.Contains(uri, "cross_project_ref") {
+				t.Error("cross-project ref file should be excluded from edits")
+			}
+		}
+	}
+}
+
+func TestRenameIntegration_ColumnPositionPropagation(t *testing.T) {
+	// Verify column position propagation works end-to-end by
+	// checking that column rename produces correct edit ranges
+	uri := "file:///models/schema.yml"
+	s := NewState()
+	s.DbtContext.ModelDetailMap = map[string]ModelDetails{
+		"orders": {
+			SchemaURI: "/models/schema.yml",
+			SchemaRange: lsp.Range{
+				Start: lsp.Position{Line: 3, Character: 8},
+				End:   lsp.Position{Line: 3, Character: 8},
+			},
+			Columns: []Column{
+				{Name: "order_id", Position: lsp.Position{Line: 7, Character: 14}},
+				{Name: "status", Position: lsp.Position{Line: 8, Character: 14}},
+			},
+		},
+	}
+
+	// Rename order_id -> purchase_id
+	resp := s.Rename(1, uri, lsp.Position{Line: 7, Character: 16}, "purchase_id")
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %s", resp.Error.Message)
+	}
+	if resp.Result == nil || len(resp.Result.DocumentChanges) != 1 {
+		t.Fatal("expected exactly 1 document change")
+	}
+	dc := resp.Result.DocumentChanges[0]
+	edit := dc.TextDocumentEditValue.Edits[0]
+	// Range should span the column name: char 14 to 14+8=22
+	if edit.Range.Start.Character != 14 {
+		t.Errorf("start char: got %d, want 14", edit.Range.Start.Character)
+	}
+	if edit.Range.End.Character != 22 {
+		t.Errorf("end char: got %d, want 22", edit.Range.End.Character)
+	}
+	if edit.Range.Start.Line != 7 {
+		t.Errorf("line: got %d, want 7", edit.Range.Start.Line)
 	}
 }
