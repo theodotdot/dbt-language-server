@@ -17,7 +17,8 @@ type CodeAction struct {
 }
 
 type WorkspaceEdit struct {
-	Changes map[string][]TextEdit `json:"changes"`
+	Changes         map[string][]TextEdit `json:"changes,omitempty"`
+	DocumentChanges []DocumentChange      `json:"documentChanges,omitempty"`
 }
 
 type CodeActionRequest struct {
