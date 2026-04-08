@@ -35,6 +35,11 @@ type ServerCapabilities struct {
 	ExecuteCommandProvider ExecuteCommandOptions  `json:"executeCommandProvider"`
 	SemanticTokensProvider *SemanticTokensOptions `json:"semanticTokensProvider,omitempty"`
 	CodeActionProvider     bool                   `json:"codeActionProvider"`
+	RenameProvider         *RenameOptions         `json:"renameProvider,omitempty"`
+}
+
+type RenameOptions struct {
+	PrepareProvider bool `json:"prepareProvider"`
 }
 
 type ExecuteCommandOptions struct {
@@ -61,6 +66,7 @@ func NewInitializeResponse(id int) InitializeResponse {
 					TriggerCharacters: []string{"."},
 				},
 				CodeActionProvider: true,
+				RenameProvider:     &RenameOptions{PrepareProvider: true},
 				ExecuteCommandProvider: ExecuteCommandOptions{
 					Commands: []string{"dbt.goToSchema"},
 				},

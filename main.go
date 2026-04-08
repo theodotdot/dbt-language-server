@@ -207,6 +207,24 @@ func handleMessage(logger *log.Logger, writer io.Writer, state *analysis.State, 
 
 		response := state.TextDocumentCodeAction(request.ID, request.Params.TextDocument.URI, request.Params.Range)
 		util.WriteResponse(writer, response)
+	case "textDocument/prepareRename":
+		var request lsp.PrepareRenameRequest
+		if err := json.Unmarshal(contents, &request); err != nil {
+			logger.Printf("textDocument/prepareRename: %s", err)
+			return
+		}
+
+		response := state.PrepareRename(request.ID, request.Params.TextDocument.URI, request.Params.Position)
+		util.WriteResponse(writer, response)
+	case "textDocument/rename":
+		var request lsp.RenameRequest
+		if err := json.Unmarshal(contents, &request); err != nil {
+			logger.Printf("textDocument/rename: %s", err)
+			return
+		}
+
+		response := state.Rename(request.ID, request.Params.TextDocument.URI, request.Params.Position, request.Params.NewName)
+		util.WriteResponse(writer, response)
 	case "textDocument/semanticTokens/full":
 		logger.Print("textDocument/semanticTokens/full")
 		var request lsp.SemanticTokensRequest
