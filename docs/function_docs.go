@@ -30,7 +30,7 @@ func (d Dialect) FunctionCompletionItems() []lsp.CompletionItem {
 			Documentation: v,
 			Kind:          completionKind.Function,
 			InsertText:    k,
-			SortText:      k,
+			SortText:      "2" + k,
 		})
 	}
 	return items

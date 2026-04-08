@@ -22,7 +22,7 @@ func getRefCompletionItems(modelMap map[string]ModelDetails, suffix string) []ls
 				Documentation: modelMap[k].Description,
 				Kind:          completionKind.Reference,
 				InsertText:    fmt.Sprintf("%s%s", k, suffix),
-				SortText:      k,
+				SortText:      "1" + k,
 			},
 		)
 	}
@@ -114,7 +114,7 @@ func getMacroCompletionItems(packageMacroMap map[Package]map[string]Macro, Proje
 					Kind:             completionKind.Snippet,
 					InsertText:       insertText,
 					InsertTextFormat: insertTextFormat,
-					SortText:         k,
+					SortText:         "1" + k,
 				},
 			)
 		}
@@ -135,7 +135,7 @@ func getVariableCompletionItems(variables map[string]Variable, suffix string) []
 				Documentation: fmt.Sprintf("%v", v.Value),
 				Kind:          completionKind.Variable,
 				InsertText:    fmt.Sprintf("%s%s", k, suffix),
-				SortText:      k,
+				SortText:      "1" + k,
 			},
 		)
 	}
@@ -163,7 +163,7 @@ func getColumnCompletionItems(modelNames []string, modelMap map[string]ModelDeta
 				Documentation: col.Description,
 				Kind:          completionKind.Field,
 				InsertText:    col.Name,
-				SortText:      col.Name,
+				SortText:      "0" + col.Name,
 			})
 		}
 	}
@@ -220,7 +220,7 @@ func getSourceCompletionItems(sources map[string]Source, suffix string, quoteTyp
 					Documentation: fmt.Sprintf("%s\n\nTable: %s\n%s", s.Description, t.Name, t.Description),
 					Kind:          completionKind.Reference,
 					InsertText:    fmt.Sprintf("%s%s, %s%s%s", s.Name, quoteType, quoteType, t.Name, suffix),
-					SortText:      k,
+					SortText:      "1" + k,
 				},
 			)
 		}

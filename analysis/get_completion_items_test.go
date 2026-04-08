@@ -209,7 +209,7 @@ func TestGetMacroCompletionItems(t *testing.T) {
 			Kind:             completionKind.Snippet,
 			InsertText:       "jaffle_package.add_values(${1:arg1}, ${2:arg2})",
 			InsertTextFormat: 2,
-			SortText:         "add_values",
+			SortText:         "1add_values",
 		},
 		{
 			Label:            "full_name",
@@ -218,7 +218,7 @@ func TestGetMacroCompletionItems(t *testing.T) {
 			Kind:             completionKind.Snippet,
 			InsertText:       "full_name(${1:first_name}, ${2:last_name})",
 			InsertTextFormat: 2,
-			SortText:         "full_name",
+			SortText:         "1full_name",
 		},
 		{
 			Label:            "times_five",
@@ -227,7 +227,7 @@ func TestGetMacroCompletionItems(t *testing.T) {
 			Kind:             completionKind.Snippet,
 			InsertText:       "times_five(${1:int_value})",
 			InsertTextFormat: 2,
-			SortText:         "times_five",
+			SortText:         "1times_five",
 		},
 	}
 
@@ -334,6 +334,66 @@ func TestGetColumnCompletionItems(t *testing.T) {
 		}
 		if items[0].Documentation != "" {
 			t.Errorf("expected empty documentation, got %q", items[0].Documentation)
+		}
+	})
+}
+
+func TestSortTextPrefixes(t *testing.T) {
+	t.Run("ref prefix 1", func(t *testing.T) {
+		items := getRefCompletionItems(map[string]ModelDetails{"m": {}}, "")
+		for _, item := range items {
+			if !strings.HasPrefix(item.SortText, "1") {
+				t.Errorf("ref SortText %q should start with '1'", item.SortText)
+			}
+		}
+	})
+
+	t.Run("source prefix 1", func(t *testing.T) {
+		sources := map[string]Source{
+			"s": {Name: "s", Tables: map[string]SourceTable{"t": {Name: "t"}}},
+		}
+		items := getSourceCompletionItems(sources, "", "'")
+		for _, item := range items {
+			if !strings.HasPrefix(item.SortText, "1") {
+				t.Errorf("source SortText %q should start with '1'", item.SortText)
+			}
+		}
+	})
+
+	t.Run("variable prefix 1", func(t *testing.T) {
+		items := getVariableCompletionItems(map[string]Variable{"v": {}}, "")
+		for _, item := range items {
+			if !strings.HasPrefix(item.SortText, "1") {
+				t.Errorf("variable SortText %q should start with '1'", item.SortText)
+			}
+		}
+	})
+
+	t.Run("column prefix 0", func(t *testing.T) {
+		m := map[string]ModelDetails{"m": {Columns: []Column{{Name: "col"}}}}
+		items := getColumnCompletionItems([]string{"m"}, m)
+		for _, item := range items {
+			if !strings.HasPrefix(item.SortText, "0") {
+				t.Errorf("column SortText %q should start with '0'", item.SortText)
+			}
+		}
+	})
+
+	t.Run("scope column prefix 0", func(t *testing.T) {
+		items := getScopeColumnCompletionItems([]parser.ScopeColumn{{Name: "c", Source: "s"}})
+		for _, item := range items {
+			if !strings.HasPrefix(item.SortText, "0") {
+				t.Errorf("scope column SortText %q should start with '0'", item.SortText)
+			}
+		}
+	})
+
+	t.Run("macro arg prefix 00", func(t *testing.T) {
+		items := getMacroArgCompletionItems(Macro{Arguments: []MacroArg{{Name: "a"}}}, nil)
+		for _, item := range items {
+			if !strings.HasPrefix(item.SortText, "00") {
+				t.Errorf("macro arg SortText %q should start with '00'", item.SortText)
+			}
 		}
 	})
 }
