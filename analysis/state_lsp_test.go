@@ -614,6 +614,114 @@ func TestScopeColumnCompletion(t *testing.T) {
 	})
 }
 
+func TestDotQualifiedCompletion(t *testing.T) {
+	state := newTestState()
+	// Add orders model for alias tests
+	state.DbtContext.ModelDetailMap["orders"] = ModelDetails{
+		URI:         "/test/models/orders.sql",
+		ProjectName: "test_project",
+		Columns: []Column{
+			{Name: "order_id", Description: "Order ID"},
+			{Name: "customer_id", Description: "FK"},
+		},
+	}
+	uri := "test://dot.sql"
+
+	t.Run("alias dot returns aliased columns", func(t *testing.T) {
+		state.parseDocument(uri, "select o. from {{ ref('orders') }} o")
+		resp := state.TextDocumentCompletion(1, uri, lsp.Position{Line: 0, Character: 9})
+		if len(resp.Result) == 0 {
+			t.Fatal("expected completion items for alias 'o'")
+		}
+		for _, item := range resp.Result {
+			if item.Kind != completionKind.Field {
+				t.Errorf("expected Field kind, got %d for %q", item.Kind, item.Label)
+			}
+		}
+		labels := map[string]bool{}
+		for _, item := range resp.Result {
+			labels[item.Label] = true
+		}
+		if !labels["order_id"] || !labels["customer_id"] {
+			t.Errorf("expected order_id and customer_id, got %v", labels)
+		}
+	})
+
+	t.Run("jinja dot is NOT column completion", func(t *testing.T) {
+		state.parseDocument(uri, "select {{ dbt_utils.")
+		resp := state.TextDocumentCompletion(1, uri, lsp.Position{Line: 0, Character: 20})
+		for _, item := range resp.Result {
+			if item.Kind == completionKind.Field {
+				t.Errorf("should not return Field items inside jinja, got %q", item.Label)
+			}
+		}
+	})
+
+	t.Run("jinja config dot is NOT column completion", func(t *testing.T) {
+		state.parseDocument(uri, "select {{ config.")
+		resp := state.TextDocumentCompletion(1, uri, lsp.Position{Line: 0, Character: 17})
+		for _, item := range resp.Result {
+			if item.Kind == completionKind.Field {
+				t.Errorf("should not return Field items inside jinja, got %q", item.Label)
+			}
+		}
+	})
+
+	t.Run("unknown alias returns no columns", func(t *testing.T) {
+		state.parseDocument(uri, "select x. from {{ ref('orders') }}")
+		resp := state.TextDocumentCompletion(1, uri, lsp.Position{Line: 0, Character: 9})
+		for _, item := range resp.Result {
+			if item.Kind == completionKind.Field {
+				t.Errorf("should not return Field items for unknown alias, got %q", item.Label)
+			}
+		}
+	})
+
+	t.Run("filter text set correctly", func(t *testing.T) {
+		state.parseDocument(uri, "select o. from {{ ref('orders') }} o")
+		resp := state.TextDocumentCompletion(1, uri, lsp.Position{Line: 0, Character: 9})
+		for _, item := range resp.Result {
+			expected := "o." + item.Label
+			if item.FilterText != expected {
+				t.Errorf("FilterText: got %q, want %q", item.FilterText, expected)
+			}
+		}
+	})
+
+	t.Run("text edit present with correct range", func(t *testing.T) {
+		state.parseDocument(uri, "select o. from {{ ref('orders') }} o")
+		resp := state.TextDocumentCompletion(1, uri, lsp.Position{Line: 0, Character: 9})
+		for _, item := range resp.Result {
+			if item.TextEdit == nil {
+				t.Errorf("expected TextEdit for %q", item.Label)
+				continue
+			}
+			if item.TextEdit.Range.Start.Character != 9 {
+				t.Errorf("TextEdit start: got %d, want 9", item.TextEdit.Range.Start.Character)
+			}
+			if item.TextEdit.NewText != item.Label {
+				t.Errorf("TextEdit NewText: got %q, want %q", item.TextEdit.NewText, item.Label)
+			}
+		}
+	})
+
+	t.Run("join with two aliases", func(t *testing.T) {
+		sql := "select c. from {{ ref('customers') }} c join {{ ref('orders') }} o on c.customer_id = o.customer_id"
+		state.parseDocument(uri, sql)
+		resp := state.TextDocumentCompletion(1, uri, lsp.Position{Line: 0, Character: 9})
+		labels := map[string]bool{}
+		for _, item := range resp.Result {
+			labels[item.Label] = true
+		}
+		if !labels["customer_id"] || !labels["first_name"] {
+			t.Errorf("expected customer columns for alias 'c', got %v", labels)
+		}
+		if labels["order_id"] {
+			t.Error("should not include order columns for alias 'c'")
+		}
+	})
+}
+
 func TestDocumentScopePopulated(t *testing.T) {
 	state := newTestState()
 	uri := "test://scope.sql"

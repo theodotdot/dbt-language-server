@@ -11,6 +11,7 @@ import (
 	"github.com/j-clemons/dbt-language-server/analysis/parser"
 	"github.com/j-clemons/dbt-language-server/docs"
 	"github.com/j-clemons/dbt-language-server/lsp"
+	"github.com/j-clemons/dbt-language-server/lsp/completionKind"
 	"github.com/j-clemons/dbt-language-server/util"
 )
 
@@ -19,6 +20,7 @@ var (
 	sourceTriggerRegex     = regexp.MustCompile(`\bsource\(('|")[a-zA-Z]*$`)
 	varTriggerRegex        = regexp.MustCompile(`\bvar\(('|")[a-zA-Z]*$`)
 	jinjaBlockTriggerRegex = regexp.MustCompile(`\{\{\s*`)
+	dotTriggerRegex        = regexp.MustCompile(`\b([a-zA-Z_][a-zA-Z0-9_]*)\.$`)
 )
 
 type State struct {
@@ -496,6 +498,42 @@ func getReferencedModels(tokens *parser.TokenIndex) []string {
 	return models
 }
 
+func isInsideJinjaBlock(text string) bool {
+	return strings.Count(text, "{{") > strings.Count(text, "}}")
+}
+
+func detectDotContext(textBeforeCursor string) (string, bool) {
+	if isInsideJinjaBlock(textBeforeCursor) {
+		return "", false
+	}
+	match := dotTriggerRegex.FindStringSubmatch(textBeforeCursor)
+	if match == nil {
+		return "", false
+	}
+	return match[1], true
+}
+
+func getDotQualifiedCompletionItems(columns []parser.ScopeColumn, alias string, position lsp.Position) []lsp.CompletionItem {
+	items := make([]lsp.CompletionItem, 0, len(columns))
+	for _, col := range columns {
+		items = append(items, lsp.CompletionItem{
+			Label:      col.Name,
+			Detail:     fmt.Sprintf("Column from %s", col.Source),
+			Kind:       completionKind.Field,
+			FilterText: alias + "." + col.Name,
+			TextEdit: &lsp.TextEdit{
+				Range: lsp.Range{
+					Start: position,
+					End:   position,
+				},
+				NewText: col.Name,
+			},
+			SortText: "0" + col.Name,
+		})
+	}
+	return items
+}
+
 func (s *State) TextDocumentCompletion(id int, uri string, position lsp.Position) lsp.CompletionResponse {
 	items := []lsp.CompletionItem{}
 
@@ -507,7 +545,20 @@ func (s *State) TextDocumentCompletion(id int, uri string, position lsp.Position
 	textBeforeCursor := lineText[:cursorOffset]
 	textAfterCursor := lineText[cursorOffset:]
 
-	if refTriggerRegex.MatchString(textBeforeCursor) {
+	if alias, ok := detectDotContext(textBeforeCursor); ok {
+		cols := s.ResolveColumnsAtPosition(uri, alias)
+		if scope := s.Documents[uri].Scope; scope != nil {
+			cols = append(cols, s.resolveSourceColumns(scope)...)
+		}
+		// Filter to only columns matching the alias
+		var filtered []parser.ScopeColumn
+		for _, c := range cols {
+			if c.Source == alias {
+				filtered = append(filtered, c)
+			}
+		}
+		items = getDotQualifiedCompletionItems(filtered, alias, position)
+	} else if refTriggerRegex.MatchString(textBeforeCursor) {
 		items = getRefCompletionItems(
 			s.DbtContext.ModelDetailMap,
 			getSuffix(lineText, textAfterCursor, "ref"),
