@@ -261,6 +261,7 @@ func parseYamlModels(projectRoot string, projYaml DbtProjectYaml) (map[string]Mo
 						columns = append(columns, Column{
 							Name:        col.Name.Value,
 							Description: col.Description.Value,
+							Position:    col.Name.Position,
 						})
 					}
 					sourceMap[source.Name.Value].Tables[table.Name.Value] = SourceTable{

@@ -5,6 +5,7 @@ import "github.com/j-clemons/dbt-language-server/lsp"
 type Column struct {
 	Name        string
 	Description string
+	Position    lsp.Position
 }
 
 type ModelDetails struct {
@@ -67,6 +68,7 @@ func (s *State) getModelDetails() (map[string]ModelDetails, map[string]Source) {
 					columns = append(columns, Column{
 						Name:        col.Name.Value,
 						Description: col.Description.Value,
+						Position:    col.Name.Position,
 					})
 				}
 			}
