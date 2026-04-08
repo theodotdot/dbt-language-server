@@ -31,9 +31,10 @@ type ServerCapabilities struct {
 
 	HoverProvider          bool                   `json:"hoverProvider"`
 	DefinitionProvider     bool                   `json:"definitionProvider"`
-	CompletionProvider     map[string]any         `json:"completionProvider"`
+	CompletionProvider     CompletionOptions      `json:"completionProvider"`
 	ExecuteCommandProvider ExecuteCommandOptions  `json:"executeCommandProvider"`
 	SemanticTokensProvider *SemanticTokensOptions `json:"semanticTokensProvider,omitempty"`
+	CodeActionProvider     bool                   `json:"codeActionProvider"`
 }
 
 type ExecuteCommandOptions struct {
@@ -56,7 +57,10 @@ func NewInitializeResponse(id int) InitializeResponse {
 				TextDocumentSync:   2,
 				HoverProvider:      true,
 				DefinitionProvider: true,
-				CompletionProvider: map[string]any{},
+				CompletionProvider: CompletionOptions{
+					TriggerCharacters: []string{"."},
+				},
+				CodeActionProvider: true,
 				ExecuteCommandProvider: ExecuteCommandOptions{
 					Commands: []string{"dbt.goToSchema"},
 				},
