@@ -161,6 +161,15 @@ func handleMessage(logger *log.Logger, writer io.Writer, state *analysis.State, 
 		response := state.TextDocumentCompletion(request.ID, request.Params.TextDocument.URI, request.Params.Position)
 
 		util.WriteResponse(writer, response)
+	case "textDocument/codeAction":
+		var request lsp.CodeActionRequest
+		if err := json.Unmarshal(contents, &request); err != nil {
+			logger.Printf("textDocument/codeAction: %s", err)
+			return
+		}
+
+		response := state.TextDocumentCodeAction(request.ID, request.Params.TextDocument.URI, request.Params.Range)
+		util.WriteResponse(writer, response)
 	case "textDocument/semanticTokens/full":
 		logger.Print("textDocument/semanticTokens/full")
 		var request lsp.SemanticTokensRequest
