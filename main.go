@@ -76,6 +76,7 @@ func main() {
 			diagnostics.CheckVars,
 			diagnostics.CheckMacros,
 			diagnostics.CheckJinja,
+			diagnostics.CheckColumns,
 		)
 	}
 

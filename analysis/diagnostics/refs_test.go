@@ -13,6 +13,7 @@ func makeDoc(sql string) analysis.Document {
 		Text:      sql,
 		Tokens:    p.CreateTokenIndex(),
 		DefTokens: p.CreateTokenNameMap(),
+		Scope:     p.CreateQueryScope(),
 	}
 }
 

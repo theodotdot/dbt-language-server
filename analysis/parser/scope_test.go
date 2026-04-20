@@ -224,15 +224,15 @@ func TestParseSelectItems(t *testing.T) {
 			name:  "simple select list",
 			input: "select id, name from t",
 			expected: []SelectItem{
-				{Alias: "id"},
-				{Alias: "name"},
+				{Expression: "id", Alias: "id"},
+				{Expression: "name", Alias: "name"},
 			},
 		},
 		{
 			name:  "explicit AS alias",
 			input: "select id as order_id from t",
 			expected: []SelectItem{
-				{Alias: "order_id"},
+				{Expression: "id", Alias: "order_id"},
 			},
 		},
 		{
@@ -260,7 +260,14 @@ func TestParseSelectItems(t *testing.T) {
 			name:  "qualified column",
 			input: "select o.id from orders o",
 			expected: []SelectItem{
-				{Source: "o", Alias: "id"},
+				{Source: "o", Expression: "id", Alias: "id"},
+			},
+		},
+		{
+			name:  "qualified column with AS",
+			input: "select o.id as order_id from orders o",
+			expected: []SelectItem{
+				{Source: "o", Expression: "id", Alias: "order_id"},
 			},
 		},
 		{
@@ -321,6 +328,21 @@ func TestParseSelectItems(t *testing.T) {
 				{Alias: "rn"},
 			},
 		},
+		{
+			name:  "function then plain column",
+			input: "select count(*), id from t",
+			expected: []SelectItem{
+				{Alias: "count"},
+				{Expression: "id", Alias: "id"},
+			},
+		},
+		{
+			name:  "bare function no alias",
+			input: "select count(*) from t",
+			expected: []SelectItem{
+				{Alias: "count"},
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -346,6 +368,9 @@ func TestParseSelectItems(t *testing.T) {
 				}
 				if exp.Source != "" && got.Source != exp.Source {
 					t.Errorf("item[%d] Source: expected %q, got %q", i, exp.Source, got.Source)
+				}
+				if exp.Expression != "" && got.Expression != exp.Expression {
+					t.Errorf("item[%d] Expression: expected %q, got %q", i, exp.Expression, got.Expression)
 				}
 			}
 		})

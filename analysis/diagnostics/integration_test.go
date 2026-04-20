@@ -179,6 +179,7 @@ func TestAllCheckersRegistered(t *testing.T) {
 		CheckVars,
 		CheckMacros,
 		CheckJinja,
+		CheckColumns,
 	)
 
 	uri := "file:///test.sql"

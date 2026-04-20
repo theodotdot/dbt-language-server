@@ -18,9 +18,10 @@ type Parser struct {
 	clauseStack []ClauseKind
 	parenDepth  int
 	// select item accumulator
-	selectTokens   []Token
-	selectHasAS    bool
-	selectStarted  bool
+	selectTokens    []Token
+	selectHasAS     bool
+	selectHasParen  bool
+	selectStarted   bool
 	// FROM/JOIN source tracking
 	lastSourceRef  *SourceRef
 }
@@ -275,6 +276,7 @@ func (p *Parser) CreateQueryScope() *QueryScope {
 func (p *Parser) resetSelectAccumulator() {
 	p.selectTokens = p.selectTokens[:0]
 	p.selectHasAS = false
+	p.selectHasParen = false
 }
 
 func (p *Parser) finalizeSelectItem() {
@@ -292,12 +294,25 @@ func (p *Parser) finalizeSelectItem() {
 		if last.Type == IDENT {
 			item.Alias = last.Literal
 		}
+		// Extract the original column ref before alias (AS not in tokens)
+		if !p.selectHasParen {
+			preAS := tokens[:len(tokens)-1]
+			if len(preAS) == 1 && preAS[0].Type == IDENT {
+				item.Expression = preAS[0].Literal
+			} else if len(preAS) == 3 && preAS[0].Type == IDENT && preAS[1].Type == DOT && preAS[2].Type == IDENT {
+				item.Source = preAS[0].Literal
+				item.Expression = preAS[2].Literal
+			}
+		}
 	} else if len(tokens) == 1 && tokens[0].Type == IDENT {
-		// Single identifier: both expression and alias
 		item.Alias = tokens[0].Literal
+		if !p.selectHasParen {
+			item.Expression = tokens[0].Literal
+		}
 	} else if len(tokens) == 3 && tokens[0].Type == IDENT && tokens[1].Type == DOT && tokens[2].Type == IDENT {
 		// Qualified column: qualifier.column
 		item.Source = tokens[0].Literal
+		item.Expression = tokens[2].Literal
 		item.Alias = tokens[2].Literal
 	} else if len(tokens) >= 2 {
 		// Implicit alias: last IDENT at depth 0
@@ -435,6 +450,9 @@ func (p *Parser) parseTokens() {
 			}
 		case LPAREN:
 			p.parenDepth++
+			if p.currentClause() == ClauseSelect {
+				p.selectHasParen = true
+			}
 			p.incParenCount()
 		case RPAREN:
 			p.parenDepth--
