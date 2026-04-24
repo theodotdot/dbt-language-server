@@ -119,6 +119,19 @@ func TestCheckSources(t *testing.T) {
 			t.Errorf("message: got %q", diags[0].Message)
 		}
 	})
+
+	t.Run("bigquery wildcard table name", func(t *testing.T) {
+		doc := makeDoc("select * from {{ source('my_src', 'events_YYYY_*') }}")
+		ctx := analysis.DbtContext{
+			SourceDetailMap: map[string]analysis.Source{
+				"my_src": {Tables: map[string]analysis.SourceTable{"events_YYYY_*": {}}},
+			},
+		}
+		diags := CheckSources(doc, ctx)
+		if len(diags) != 0 {
+			t.Errorf("expected 0 diagnostics for wildcard table, got %d: %v", len(diags), diags)
+		}
+	})
 }
 
 func TestCheckVars(t *testing.T) {

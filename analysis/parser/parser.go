@@ -192,6 +192,10 @@ func (p *Parser) parseSource() {
 							p.NextToken()
 							if p.curTok.Type == IDENT {
 								p.curTok.Type = SOURCE_TABLE
+								if p.peekTok.Type == ASTERISK {
+									p.curTok.Literal += "*"
+									p.NextToken() // consume the asterisk
+								}
 							}
 						}
 					}
